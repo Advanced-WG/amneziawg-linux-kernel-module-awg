@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
+
+WIREGUARD_VERSION := $(shell git log -1 --format='1.0.%cd-awg' --date=format:'%Y%m%d-%H.%M' 2>/dev/null || echo 1.0.0-awg)
+OMIT_ENDPOINTS ?=
+
+KERNELRELEASE ?= $(shell uname -r)
+KERNELDIR ?= /lib/modules/$(KERNELRELEASE)/build
+PREFIX ?= /usr
+DESTDIR ?=
+SRCDIR ?= $(PREFIX)/src
+DKMSDIR ?= $(SRCDIR)/amneziawg-$(WIREGUARD_VERSION)
+DEPMOD ?= depmod
+DEPMODBASEDIR ?= /
+
+PWD := $(shell pwd)
+
+all: module
+debug: module-debug
+
+ifneq ($(V),1)
+MAKEFLAGS += --no-print-directory
+endif
+
+module:
+	@$(MAKE) -C $(KERNELDIR) M=$(PWD) WIREGUARD_VERSION="$(WIREGUARD_VERSION)" OMIT_ENDPOINTS="$(OMIT_ENDPOINTS)" modules
+
+module-debug:
+	@$(MAKE) -C $(KERNELDIR) M=$(PWD) V=1 CONFIG_AMNEZIAWG_DEBUG=y WIREGUARD_VERSION="$(WIREGUARD_VERSION)" OMIT_ENDPOINTS="$(OMIT_ENDPOINTS)" modules
+
+clean:
+	@$(MAKE) -C $(KERNELDIR) M=$(PWD) clean
+
+module-install:
+	@$(MAKE) -C $(KERNELDIR) M=$(PWD) WIREGUARD_VERSION="$(WIREGUARD_VERSION)" OMIT_ENDPOINTS="$(OMIT_ENDPOINTS)" modules_install
+	$(DEPMOD) -b "$(DEPMODBASEDIR)" -a $(KERNELRELEASE)
+
+install: module-install
+
+rwildcard=$(foreach d,$(wildcard $1*),$(call rwildcard,$d/,$2) $(filter $(subst *,%,$2),$d))
+DKMS_SOURCES := version.h Makefile Kbuild Kconfig dkms.conf $(filter-out version.h wireguard.mod.c tests/%,$(call rwildcard,,*.c *.h *.S *.pl *.include))
+print-version:
+	@echo "$(WIREGUARD_VERSION)"
+
+dkms-install: $(DKMS_SOURCES)
+	@$(foreach f,$(DKMS_SOURCES),install -v -m0644 -D $(f) $(DESTDIR)$(DKMSDIR)/$(f);)
+	@sed -i 's/^PACKAGE_VERSION=.*/PACKAGE_VERSION="$(WIREGUARD_VERSION)"/' $(DESTDIR)$(DKMSDIR)/dkms.conf
+	@printf '#ifndef WIREGUARD_VERSION\n#define WIREGUARD_VERSION "%s"\n#endif\n' "$(WIREGUARD_VERSION)" > $(DESTDIR)$(DKMSDIR)/version.h
+	@echo ""; echo "Installed version: $(WIREGUARD_VERSION)"; echo "DKMS directory:    $(DESTDIR)$(DKMSDIR)"
+
+style:
+	$(KERNELDIR)/scripts/checkpatch.pl -f --max-line-length=4000 --codespell --color=always $(filter-out wireguard.mod.c,$(wildcard *.c)) $(wildcard *.h) $(wildcard selftest/*.c)
+
+check: clean
+	scan-build --html-title=wireguard-linux-compat -maxloop 100 --view --keep-going $(MAKE) module CONFIG_WIREGUARD_DEBUG=y C=2 CF="-D__CHECK_ENDIAN__"
+
+coccicheck: clean
+	@$(MAKE) -C $(KERNELDIR) M=$(PWD) CONFIG_WIREGUARD_DEBUG=y coccicheck MODE=report
+
+cloc:
+	@cloc --skip-uniqueness --by-file --extract-with="$$(readlink -f ../kernel-tree-scripts/filter-compat-defines.sh) >FILE< > \$$(basename >FILE<)" $(filter-out wireguard.mod.c,$(wildcard *.c)) $(wildcard *.h)
+
+-include tests/debug.mk
+
+.PHONY: all module module-debug apply-patches module-install install print-version dkms-install clean cloc check style
