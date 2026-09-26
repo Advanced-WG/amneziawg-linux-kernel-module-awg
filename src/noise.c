@@ -598,8 +598,16 @@ wg_noise_handshake_consume_initiation(struct message_handshake_initiation *src,
 	u8 e[NOISE_PUBLIC_KEY_LEN];
 	u8 t[NOISE_TIMESTAMP_LEN];
 	u64 initiation_consumption;
+	/* What the initiator sent tells what it understands: plain WireGuard
+	 * framing, or for AWG 1.0 the exact H1 range start (an AWG 2.0 peer
+	 * picks a random value from the range, rarely the start itself; a
+	 * wrong guess is corrected by its next handshake).
+	 */
 	bool advanced_security = wg->advanced_security &&
-	                         mh_validate(SKB_TYPE_LE32(skb), &wg->headers[MSGIDX_HANDSHAKE_INIT]);
+	                         !(PACKET_CB(skb)->awg_flags & AWG_PACKET_PLAIN);
+	bool fixed_headers = advanced_security &&
+	                     wg->headers[MSGIDX_HANDSHAKE_INIT].start != wg->headers[MSGIDX_HANDSHAKE_INIT].end &&
+	                     le32_to_cpu(SKB_TYPE_LE32(skb)) == wg->headers[MSGIDX_HANDSHAKE_INIT].start;
 
 	down_read(&wg->static_identity.lock);
 	if (unlikely(!wg->static_identity.has_identity))
@@ -631,6 +639,7 @@ wg_noise_handshake_consume_initiation(struct message_handshake_initiation *src,
 	}
 	handshake = &peer->handshake;
 	peer->advanced_security = advanced_security;
+	peer->fixed_headers = fixed_headers;
 
 	/* ss */
 	if (!mix_precomputed_dh(chaining_key, key,

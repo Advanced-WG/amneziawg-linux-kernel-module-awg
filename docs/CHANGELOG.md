@@ -18,6 +18,22 @@ All changes relative to upstream [amneziawg-linux-kernel-module](https://github.
 - **send.c** — missing OOM check on `kzalloc` for junk packet buffer
 - **crypto/zinc/chacha20poly1305.c** — upstream declares `simd_context_t ret` instead of `bool ret` (type mismatch)
 
+## Mixed clients on one interface
+
+An obfuscated interface serves, at the same time, plain WireGuard peers (upstream [#162](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module/issues/162)), AWG 1.0 peers configured with the H1–H4 range starts ([#163](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module/issues/163)) and AWG peers without S3/S4 ([#168](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module/issues/168)). Based on the ideas of upstream PRs #164, #165 and #170, with these differences:
+
+- **receive.c** — packets are classified once in `prepare_awg_message()`; the message type and framing flags travel in `PACKET_CB`, so the dispatch no longer re-parses headers (a concurrent H1–H4 change could hit the old `WARN(1, "Non-exhaustive parsing…")`)
+- **receive.c** — exact-size messages (plain WireGuard handshakes, cookie replies without S3) are checked before transport packets: in a handshake the bytes at offset S4 are random key material that a wide H4 range often matches, which silently dropped plain WireGuard handshakes
+- **receive.c** — when a packet reads as a valid transport header both with and without the S4 prefix, the receiver index decides instead of taking the first match (~H4-range-width chance of a wrong guess per packet)
+- **receive.c** — whether a peer uses S4 is learnt only from authenticated, non-keepalive packets (amneziawg-go sends keepalives without S4), so a forged or misparsed packet cannot switch it
+- **noise.c / send.c** — plain framing is detected from how the initiation actually arrived, not from its type value, so interfaces with standard H1–H4 and custom S1/S2 also work with plain WireGuard peers; I1–I5, junk packets and S1–S4 are only sent to AWG peers
+- **send.c** — AWG 1.0 peers (initiation header equal to the H1 range start) get the range starts for all headers
+- **peer.c / device.c** — peers default to the device's obfuscation, also when it is switched on after the peers were added
+- No UAPI change: the per-peer state is detected automatically and not exported (the new netlink attributes of #165/#170 are not in upstream, even in 3.x)
+- **tests/mixed-clients.sh** — one server and four kinds of clients in network namespaces
+
+Known limit: a cookie reply (only sent under load) always uses S3, since the peer is unknown at that point.
+
 ## Kernel compatibility
 
 - **compat/compat.h, socket.c** — Linux 7.1: `ipv6_stub` removed, `ip6_dst_lookup_flow()` is called directly

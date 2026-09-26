@@ -62,6 +62,19 @@ struct packet_cb {
 	atomic_t state;
 	u32 mtu;
 	u8 ds;
+	/* Receive path: MESSAGE_* type found by prepare_awg_message() and
+	 * AWG_PACKET_* framing flags, so later stages need not re-parse the
+	 * header (the device's H1-H4 may change in the meantime).
+	 */
+	u8 msg_type;
+	u8 awg_flags;
+};
+
+enum awg_packet_flags {
+	/* Standard WireGuard framing from a device with AWG obfuscation. */
+	AWG_PACKET_PLAIN = 1U << 0,
+	/* Transport packet carried the S4 junk prefix. */
+	AWG_PACKET_S4 = 1U << 1,
 };
 
 #define PACKET_CB(skb) ((struct packet_cb *)((skb)->cb))

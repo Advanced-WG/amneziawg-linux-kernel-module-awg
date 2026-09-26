@@ -65,7 +65,16 @@ struct wg_peer {
 	struct napi_struct napi;
 	u64 internal_id;
 	atomic_t jp_packet_counter;
+	/* Per-peer AWG capabilities, so one interface can serve mixed clients.
+	 * advanced_security: obfuscation at all (false = plain WireGuard peer).
+	 * fixed_headers: peer expects the exact H1-H4 range starts (AWG 1.0).
+	 * no_s4: peer sends/expects transport packets without the S4 prefix.
+	 * Set from what the peer sends: handshake initiations and
+	 * authenticated transport packets.
+	 */
 	bool advanced_security;
+	bool fixed_headers;
+	bool no_s4;
 };
 
 struct wg_peer *wg_peer_create(struct wg_device *wg,

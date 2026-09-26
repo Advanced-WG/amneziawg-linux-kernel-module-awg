@@ -28,45 +28,105 @@ static void update_rx_stats(struct wg_peer *peer, size_t len)
 	peer->rx_bytes += len;
 }
 
+static const size_t awg_message_sizes[] = {
+	[MSGIDX_HANDSHAKE_INIT] = MESSAGE_INITIATION_SIZE,
+	[MSGIDX_HANDSHAKE_RESPONSE] = MESSAGE_RESPONSE_SIZE,
+	[MSGIDX_HANDSHAKE_COOKIE] = MESSAGE_COOKIE_REPLY_SIZE,
+	[MSGIDX_TRANSPORT] = MESSAGE_TRANSPORT_SIZE,
+};
+
+/* Does the packet carry the H<idx+1> header after a junk prefix of len junk? */
+static bool awg_header_at(struct sk_buff *skb, struct wg_device *wg, int idx,
+			  unsigned int junk)
+{
+	return mh_validate(*(__le32 *)(skb->data + junk), &wg->headers[idx]);
+}
+
+/* Is the receiver index of a transport header at data one of our keypairs? */
+static bool awg_known_keypair(struct wg_device *wg, const u8 *data)
+{
+	const struct message_data *msg = (const struct message_data *)data;
+	struct index_hashtable_entry *entry;
+	struct wg_peer *peer = NULL;
+
+	entry = wg_index_hashtable_lookup(wg->index_hashtable,
+					  INDEX_HASHTABLE_KEYPAIR,
+					  msg->key_idx, &peer);
+	wg_peer_put(peer);
+	return entry != NULL;
+}
+
+static size_t awg_accept(struct sk_buff *skb, unsigned int junk, int idx,
+			 u8 flags)
+{
+	skb_pull(skb, junk);
+	PACKET_CB(skb)->msg_type = idx + 1;
+	PACKET_CB(skb)->awg_flags = flags;
+	return awg_message_sizes[idx];
+}
+
+/* Classifies an incoming packet and strips its junk prefix. Tried in order:
+ * the device's own framing (S1-S4 prefix + H1-H4 header), then what peers
+ * with fewer AWG features send: transport and cookie packets without the
+ * S3/S4 prefix, and plain WireGuard. Stores the MESSAGE_* type and the
+ * AWG_PACKET_* flags in PACKET_CB and returns the header length (0: drop).
+ */
 static size_t prepare_awg_message(struct sk_buff *skb, struct wg_device *wg)
 {
+	unsigned int s4 = wg->junk_size[MSGIDX_TRANSPORT];
+	bool with_s4, without_s4, plain;
+	u32 type;
+	int idx;
+
 	if (skb_is_nonlinear(skb) && unlikely(skb_linearize(skb))) {
 		net_dbg_skb_ratelimited("%s: non-linear sk_buff from %pISpfsc could not be linearized, dropping packet\n",
 								wg->dev->name, skb);
 		return 0;
 	}
-	
-	if (skb->len == wg->junk_size[MSGIDX_HANDSHAKE_INIT] + MESSAGE_INITIATION_SIZE) {
-		skb_pull(skb, wg->junk_size[MSGIDX_HANDSHAKE_INIT]);
-		if (mh_validate(SKB_TYPE_LE32(skb), &wg->headers[MSGIDX_HANDSHAKE_INIT]))
-			return MESSAGE_INITIATION_SIZE;
-		else
-			skb_push(skb, wg->junk_size[MSGIDX_HANDSHAKE_INIT]);
+
+	for (idx = MSGIDX_HANDSHAKE_INIT; idx <= MSGIDX_HANDSHAKE_COOKIE; ++idx) {
+		unsigned int junk = wg->junk_size[idx];
+
+		if (skb->len == junk + awg_message_sizes[idx] &&
+		    awg_header_at(skb, wg, idx, junk))
+			return awg_accept(skb, junk, idx, 0);
 	}
 
-	if (skb->len == wg->junk_size[MSGIDX_HANDSHAKE_RESPONSE] + MESSAGE_RESPONSE_SIZE) {
-		skb_pull(skb, wg->junk_size[MSGIDX_HANDSHAKE_RESPONSE]);
-		if (mh_validate(SKB_TYPE_LE32(skb), &wg->headers[MSGIDX_HANDSHAKE_RESPONSE]))
-			return MESSAGE_RESPONSE_SIZE;
-		else
-			skb_push(skb, wg->junk_size[MSGIDX_HANDSHAKE_RESPONSE]);
-	}
+	/* Exact-size messages from simpler peers come before the transport
+	 * check: a transport header is only recognised by H4 at offset S4,
+	 * and in a handshake packet those bytes are random key material that
+	 * a wide H4 range matches quite often.
+	 */
+	if (wg->junk_size[MSGIDX_HANDSHAKE_COOKIE] &&
+	    skb->len == MESSAGE_COOKIE_REPLY_SIZE &&
+	    awg_header_at(skb, wg, MSGIDX_HANDSHAKE_COOKIE, 0))
+		return awg_accept(skb, 0, MSGIDX_HANDSHAKE_COOKIE, 0); /* no S3 */
 
-	if (skb->len == wg->junk_size[MSGIDX_HANDSHAKE_COOKIE] + MESSAGE_COOKIE_REPLY_SIZE) {
-		skb_pull(skb, wg->junk_size[MSGIDX_HANDSHAKE_COOKIE]);
-		if (mh_validate(SKB_TYPE_LE32(skb), &wg->headers[MSGIDX_HANDSHAKE_COOKIE]))
-			return MESSAGE_COOKIE_REPLY_SIZE;
-		else
-			skb_push(skb, wg->junk_size[MSGIDX_HANDSHAKE_COOKIE]);
-	}
+	type = le32_to_cpu(SKB_TYPE_LE32(skb));
+	plain = wg->advanced_security && type >= MESSAGE_HANDSHAKE_INITIATION &&
+		type <= MESSAGE_DATA;
+	if (plain && type != MESSAGE_DATA &&
+	    skb->len == awg_message_sizes[type - 1])
+		return awg_accept(skb, 0, type - 1, AWG_PACKET_PLAIN);
 
-	if (skb->len >= wg->junk_size[MSGIDX_TRANSPORT] + MESSAGE_TRANSPORT_SIZE) {
-		skb_pull(skb, wg->junk_size[MSGIDX_TRANSPORT]);
-		if (mh_validate(SKB_TYPE_LE32(skb), &wg->headers[MSGIDX_TRANSPORT]))
-			return MESSAGE_TRANSPORT_SIZE;
-		else
-			skb_push(skb, wg->junk_size[MSGIDX_TRANSPORT]);
-	}
+	with_s4 = skb->len >= s4 + MESSAGE_MINIMUM_LENGTH &&
+		  awg_header_at(skb, wg, MSGIDX_TRANSPORT, s4);
+	/* Without the S4 prefix: AWG peer without S3/S4, or plain WireGuard. */
+	without_s4 = s4 && skb->len >= MESSAGE_MINIMUM_LENGTH &&
+		     awg_header_at(skb, wg, MSGIDX_TRANSPORT, 0);
+	plain = plain && type == MESSAGE_DATA && skb->len >= MESSAGE_MINIMUM_LENGTH;
+	/* The bytes at offset S4 of a packet without the prefix are counter
+	 * and ciphertext, which fall into a wide H4 range quite often. When
+	 * both readings look valid, the receiver index decides.
+	 */
+	if (with_s4 && (without_s4 || plain))
+		with_s4 = awg_known_keypair(wg, skb->data + s4);
+	if (with_s4)
+		return awg_accept(skb, s4, MSGIDX_TRANSPORT, s4 ? AWG_PACKET_S4 : 0);
+	if (without_s4)
+		return awg_accept(skb, 0, MSGIDX_TRANSPORT, 0);
+	if (plain)
+		return awg_accept(skb, 0, MSGIDX_TRANSPORT, AWG_PACKET_PLAIN);
 
 	net_dbg_skb_ratelimited("%s: Unknown message from %pISpfsc encountered, packet dropped\n",
 								wg->dev->name, skb);
@@ -131,7 +191,7 @@ static void wg_receive_handshake_packet(struct wg_device *wg,
 	bool packet_needs_cookie;
 	bool under_load;
 
-	if (mh_validate(SKB_TYPE_LE32(skb), &wg->headers[MSGIDX_HANDSHAKE_COOKIE])) {
+	if (PACKET_CB(skb)->msg_type == MESSAGE_HANDSHAKE_COOKIE) {
 		net_dbg_skb_ratelimited("%s: Receiving cookie response from %pISpfsc\n",
 					wg->dev->name, skb);
 		wg_cookie_message_consume(
@@ -161,7 +221,7 @@ static void wg_receive_handshake_packet(struct wg_device *wg,
 		return;
 	}
 
-	if (mh_validate(SKB_TYPE_LE32(skb), &wg->headers[MSGIDX_HANDSHAKE_INIT])) {
+	if (PACKET_CB(skb)->msg_type == MESSAGE_HANDSHAKE_INITIATION) {
 		struct message_handshake_initiation *message =
 			(struct message_handshake_initiation *)skb->data;
 
@@ -182,7 +242,7 @@ static void wg_receive_handshake_packet(struct wg_device *wg,
 				    &peer->endpoint.addr);
 		wg_packet_send_handshake_response(peer);
 	}
-	if (mh_validate(SKB_TYPE_LE32(skb), &wg->headers[MSGIDX_HANDSHAKE_RESPONSE])) {
+	if (PACKET_CB(skb)->msg_type == MESSAGE_HANDSHAKE_RESPONSE) {
 		struct message_handshake_response *message =
 			(struct message_handshake_response *)skb->data;
 
@@ -497,6 +557,17 @@ int wg_packet_rx_poll(struct napi_struct *napi, int budget)
 			goto next;
 		}
 
+		/* Learn whether the peer uses the S4 prefix, from authenticated
+		 * packets only. Keepalives (empty after decryption) do not
+		 * clear it: some implementations send them without the prefix.
+		 */
+		if (peer->advanced_security) {
+			if (PACKET_CB(skb)->awg_flags & AWG_PACKET_S4)
+				WRITE_ONCE(peer->no_s4, false);
+			else if (skb->len && peer->device->junk_size[MSGIDX_TRANSPORT])
+				WRITE_ONCE(peer->no_s4, true);
+		}
+
 		if (unlikely(wg_socket_endpoint_from_skb(&endpoint, skb)))
 			goto next;
 
@@ -585,9 +656,7 @@ void wg_packet_receive(struct wg_device *wg, struct sk_buff *skb)
 	if (unlikely(prepare_skb_header(skb, wg) < 0))
 		goto err;
 
-	if (mh_validate(SKB_TYPE_LE32(skb), &wg->headers[MSGIDX_HANDSHAKE_INIT]) ||
-		mh_validate(SKB_TYPE_LE32(skb), &wg->headers[MSGIDX_HANDSHAKE_RESPONSE]) ||
-		mh_validate(SKB_TYPE_LE32(skb), &wg->headers[MSGIDX_HANDSHAKE_COOKIE])) {
+	if (PACKET_CB(skb)->msg_type != MESSAGE_DATA) {
 		int cpu, ret = -EBUSY;
 
 		if (unlikely(!rng_is_initialized()))
@@ -610,12 +679,9 @@ void wg_packet_receive(struct wg_device *wg, struct sk_buff *skb)
 		/* Queues up a call to packet_process_queued_handshake_packets(skb): */
 		queue_work_on(cpu, wg->handshake_receive_wq,
 			      &per_cpu_ptr(wg->handshake_queue.worker, cpu)->work);
-	} else if (mh_validate(SKB_TYPE_LE32(skb), &wg->headers[MSGIDX_TRANSPORT])) {
+	} else {
 		PACKET_CB(skb)->ds = ip_tunnel_get_dsfield(ip_hdr(skb), skb);
 		wg_packet_consume_data(wg, skb);
-	} else {
-		WARN(1, "Non-exhaustive parsing of packet header lead to unknown packet type!\n");
-		goto err;
 	}
 	return;
 

@@ -33,6 +33,8 @@ static void wg_packet_send_handshake_initiation(struct wg_peer *peer)
 	u16 junk_packet_count, junk_packet_size, junk_min, junk_max;
 	int i;
 	struct jp_spec* spec;
+	/* Plain WireGuard peers get no I1-I5, junk packets or S1 prefix. */
+	bool advanced = READ_ONCE(peer->advanced_security);
 
 	if (unlikely(READ_ONCE(peer->is_dead)))
 		return;
@@ -50,7 +52,7 @@ static void wg_packet_send_handshake_initiation(struct wg_peer *peer)
 	/* Lock each ispec individually so netlink reconfig of one ispec
 	 * does not block sending from the others.
 	 */
-	for (i = 0; i < ARRAY_SIZE(wg->ispecs); ++i)
+	for (i = 0; advanced && i < ARRAY_SIZE(wg->ispecs); ++i)
 	{
 		spec = &wg->ispecs[i];
 		if (READ_ONCE(spec->pkt_size) > 0) {
@@ -68,7 +70,7 @@ static void wg_packet_send_handshake_initiation(struct wg_peer *peer)
 	 * read each once and never trust jmin <= jmax: the buffer is sized by
 	 * the larger bound and every draw stays inside it.
 	 */
-	junk_packet_count = READ_ONCE(wg->jc);
+	junk_packet_count = advanced ? READ_ONCE(wg->jc) : 0;
 	junk_min = READ_ONCE(wg->jmin);
 	junk_max = READ_ONCE(wg->jmax);
 	if (junk_min > junk_max)
@@ -91,14 +93,18 @@ static void wg_packet_send_handshake_initiation(struct wg_peer *peer)
 		}
 	}
 
-	if (wg_noise_handshake_create_initiation(&packet, &peer->handshake, mh_genheader(&wg->headers[MSGIDX_HANDSHAKE_INIT]))) {
+	if (wg_noise_handshake_create_initiation(&packet, &peer->handshake,
+			advanced ?
+			mh_peerheader(&wg->headers[MSGIDX_HANDSHAKE_INIT], READ_ONCE(peer->fixed_headers)) :
+			MESSAGE_HANDSHAKE_INITIATION)) {
 		wg_cookie_add_mac_to_packet(&packet, sizeof(packet), peer);
 		wg_timers_any_authenticated_packet_traversal(peer);
 		wg_timers_any_authenticated_packet_sent(peer);
 		atomic64_set(&peer->last_sent_handshake,
 			     ktime_get_coarse_boottime_ns());
 		wg_socket_send_buffer_to_peer(peer, &packet, sizeof(packet),
-					      HANDSHAKE_DSCP, wg->junk_size[MSGIDX_HANDSHAKE_INIT]);
+					      HANDSHAKE_DSCP,
+					      advanced ? wg->junk_size[MSGIDX_HANDSHAKE_INIT] : 0);
 		wg_timers_handshake_initiated(peer);
 	}
 }
@@ -146,13 +152,17 @@ void wg_packet_send_handshake_response(struct wg_peer *peer)
 {
 	struct message_handshake_response packet;
 	struct wg_device *wg = peer->device;
+	bool advanced = READ_ONCE(peer->advanced_security);
 
 	atomic64_set(&peer->last_sent_handshake, ktime_get_coarse_boottime_ns());
 	net_dbg_ratelimited("%s: Sending handshake response to peer %llu (%pISpfsc)\n",
 			    peer->device->dev->name, peer->internal_id,
 			    &peer->endpoint.addr);
 
-	if (wg_noise_handshake_create_response(&packet, &peer->handshake, mh_genheader(&wg->headers[MSGIDX_HANDSHAKE_RESPONSE]))) {
+	if (wg_noise_handshake_create_response(&packet, &peer->handshake,
+			advanced ?
+			mh_peerheader(&wg->headers[MSGIDX_HANDSHAKE_RESPONSE], READ_ONCE(peer->fixed_headers)) :
+			MESSAGE_HANDSHAKE_RESPONSE)) {
 		wg_cookie_add_mac_to_packet(&packet, sizeof(packet), peer);
 		if (wg_noise_handshake_begin_session(&peer->handshake,
 						     &peer->keypairs)) {
@@ -164,7 +174,7 @@ void wg_packet_send_handshake_response(struct wg_peer *peer)
 			wg_socket_send_buffer_to_peer(peer, &packet,
 						      sizeof(packet),
 						      HANDSHAKE_DSCP,
-							  wg->junk_size[MSGIDX_HANDSHAKE_RESPONSE]);
+						      advanced ? wg->junk_size[MSGIDX_HANDSHAKE_RESPONSE] : 0);
 		}
 	}
 }
@@ -174,15 +184,22 @@ void wg_packet_send_handshake_cookie(struct wg_device *wg,
 				     __le32 sender_index)
 {
 	struct message_handshake_cookie packet;
+	/* No peer is known yet: answer in the framing of the denied message. */
+	bool plain = PACKET_CB(initiating_skb)->awg_flags & AWG_PACKET_PLAIN;
+	u32 type = le32_to_cpu(SKB_TYPE_LE32(initiating_skb));
+	int idx = PACKET_CB(initiating_skb)->msg_type - 1;
+	bool fixed = wg->headers[idx].start != wg->headers[idx].end &&
+		     type == wg->headers[idx].start;
 
 	net_dbg_skb_ratelimited("%s: Sending cookie response for denied handshake message for %pISpfsc\n",
 				wg->dev->name, initiating_skb);
 	wg_cookie_message_create(&packet, initiating_skb, sender_index,
 				 &wg->cookie_checker,
-				 mh_genheader(&wg->headers[MSGIDX_HANDSHAKE_COOKIE]));
+				 plain ? MESSAGE_HANDSHAKE_COOKIE :
+				 mh_peerheader(&wg->headers[MSGIDX_HANDSHAKE_COOKIE], fixed));
 	wg_socket_send_buffer_as_reply_to_skb(wg, initiating_skb, &packet,
 					      sizeof(packet),
-						  wg->junk_size[MSGIDX_HANDSHAKE_COOKIE]);
+					      plain ? 0 : wg->junk_size[MSGIDX_HANDSHAKE_COOKIE]);
 }
 
 static void keep_key_fresh(struct wg_peer *peer)
@@ -358,6 +375,8 @@ void wg_packet_encrypt_worker(struct work_struct *work)
 						 work)->ptr;
 	struct sk_buff *first, *skb, *next;
 	struct wg_device *wg;
+	struct wg_peer *peer;
+	bool advanced;
 
 #ifdef COMPAT_CRYPTO_IS_ZINC
 	simd_context_t simd_context;
@@ -367,11 +386,16 @@ void wg_packet_encrypt_worker(struct work_struct *work)
 		enum packet_state state = PACKET_STATE_CRYPTED;
 
 		skb_list_walk_safe(first, skb, next) {
-			wg = PACKET_PEER(first)->device;
+			peer = PACKET_PEER(first);
+			wg = peer->device;
+			advanced = READ_ONCE(peer->advanced_security);
 
 			if (likely(encrypt_packet(
-						  mh_genheader(&wg->headers[MSGIDX_TRANSPORT]),
-						  wg->junk_size[MSGIDX_TRANSPORT],
+						  advanced ?
+						  mh_peerheader(&wg->headers[MSGIDX_TRANSPORT], READ_ONCE(peer->fixed_headers)) :
+						  MESSAGE_DATA,
+						  advanced && !READ_ONCE(peer->no_s4) ?
+						  wg->junk_size[MSGIDX_TRANSPORT] : 0,
 						  skb,
 						  PACKET_CB(first)->keypair
 						  COMPAT_MAYBE_SIMD_CONTEXT(&simd_context)))) {

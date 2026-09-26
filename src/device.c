@@ -661,6 +661,13 @@ void wg_awg_params_set(struct wg_device *wg, const struct awg_params *p,
 		idesc[i] = NULL;
 	}
 
+	/* Peers created before obfuscation was switched on default to it too. */
+	if (!wg->advanced_security) {
+		struct wg_peer *peer;
+
+		list_for_each_entry(peer, &wg->peer_list, peer_list)
+			peer->advanced_security = true;
+	}
 	wg->advanced_security = true;
 }
 

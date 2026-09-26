@@ -14,4 +14,12 @@ int mh_genspec(struct magic_header *mh, char *desc, size_t buflen);
 bool mh_validate(__le32 received, struct magic_header* mh);
 u32 mh_genheader(struct magic_header* mh);
 
+/* Header for a peer: AWG 1.0 peers only know one value per message type,
+ * the range start; everyone else gets a random value from the range.
+ */
+static inline u32 mh_peerheader(struct magic_header *mh, bool fixed)
+{
+    return fixed ? mh->start : mh_genheader(mh);
+}
+
 #endif

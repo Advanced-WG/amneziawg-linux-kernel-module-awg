@@ -37,6 +37,8 @@ struct wg_peer *wg_peer_create(struct wg_device *wg,
 		goto err;
 
 	peer->device = wg;
+	/* Assume a full AWG peer until it shows otherwise. */
+	peer->advanced_security = wg->advanced_security;
 	wg_noise_handshake_init(&peer->handshake, &wg->static_identity,
 				public_key, preshared_key, peer);
 	peer->internal_id = atomic64_inc_return(&peer_counter);
