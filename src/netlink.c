@@ -77,7 +77,8 @@ static const struct nla_policy peer_policy[WGPEER_A_MAX + 1] = {
 	[WGPEER_A_TX_BYTES]				= { .type = NLA_U64 },
 	[WGPEER_A_ALLOWEDIPS]				= { .type = NLA_NESTED },
 	[WGPEER_A_PROTOCOL_VERSION]			= { .type = NLA_U32 },
-	[WGPEER_A_ADVANCED_SECURITY]    		= { .type = NLA_FLAG }
+	[WGPEER_A_ADVANCED_SECURITY]    		= { .type = NLA_FLAG },
+	[WGPEER_A_AWG_PEER_FLAGS]			= { .type = NLA_U32 }	/* read-only */
 };
 
 static const struct nla_policy allowedip_policy[WGALLOWEDIP_A_MAX + 1] = {
@@ -327,6 +328,22 @@ get_peer(struct wg_peer *peer, struct sk_buff *skb, struct dump_ctx *ctx)
 
 	if (peer->advanced_security) {
 		fail = nla_put_flag(skb, WGPEER_A_ADVANCED_SECURITY);
+		if (fail)
+			goto err;
+	}
+
+	/* Sent for every peer of an obfuscated device, so userspace can tell a
+	 * plain WireGuard peer (no WGPEER_A_ADVANCED_SECURITY) from a module
+	 * that does not detect peer capabilities at all.
+	 */
+	if (peer->device->advanced_security) {
+		u32 awg_flags = 0;
+
+		if (peer->advanced_security && READ_ONCE(peer->fixed_headers))
+			awg_flags |= AWG_PEER_F_FIXED_HEADERS;
+		if (peer->advanced_security && READ_ONCE(peer->no_s4))
+			awg_flags |= AWG_PEER_F_NO_S4;
+		fail = nla_put_u32(skb, WGPEER_A_AWG_PEER_FLAGS, awg_flags);
 		if (fail)
 			goto err;
 	}

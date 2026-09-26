@@ -32,6 +32,8 @@ An obfuscated interface serves, at the same time, plain WireGuard peers (upstrea
 - No UAPI change: the per-peer state is detected automatically and not exported (the new netlink attributes of #165/#170 are not in upstream, even in 3.x)
 - **tests/mixed-clients.sh** — one server and four kinds of clients in network namespaces
 
+- **netlink.c / uapi** — `WGPEER_A_AWG_PEER_FLAGS` (NLA_U32, read-only) reports for every peer of an obfuscated device what it was detected to support: `AWG_PEER_F_FIXED_HEADERS` (AWG 1.0), `AWG_PEER_F_NO_S4`; with `WGPEER_A_ADVANCED_SECURITY` absent it marks a plain WireGuard peer. One attribute (number 12) so the divergence from upstream stays small; tools that do not know it ignore it
+
 Known limit: a cookie reply (only sent under load) always uses S3, since the peer is unknown at that point.
 
 ## Kernel compatibility

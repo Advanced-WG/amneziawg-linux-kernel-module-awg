@@ -49,6 +49,13 @@
  *                    ...
  *                ...
  *            WGPEER_A_PROTOCOL_VERSION: NLA_U32
+ *            WGPEER_A_ADVANCED_SECURITY: flag, set when the peer uses
+ *                                        AmneziaWG obfuscation
+ *            WGPEER_A_AWG_PEER_FLAGS: NLA_U32, for every peer of a device
+ *                                     with AmneziaWG obfuscation: 0 or more
+ *                                     of enum awg_peer_flag, what the peer
+ *                                     was detected to support (read-only,
+ *                                     patched fork)
  *        0: NLA_NESTED
  *            ...
  *        ...
@@ -228,9 +235,21 @@ enum wgpeer_attribute {
 	WGPEER_A_ALLOWEDIPS,
 	WGPEER_A_PROTOCOL_VERSION,
 	WGPEER_A_ADVANCED_SECURITY,
+	WGPEER_A_AWG_PEER_FLAGS,
 	__WGPEER_A_LAST
 };
 #define WGPEER_A_MAX (__WGPEER_A_LAST - 1)
+
+/* WGPEER_A_AWG_PEER_FLAGS: how an AmneziaWG peer talks to this device,
+ * learnt from the packets it sends (see peer.h).
+ */
+enum awg_peer_flag {
+	/* Uses only the H1-H4 range starts (AWG 1.0 client). */
+	AWG_PEER_F_FIXED_HEADERS = 1U << 0,
+	/* Sends transport packets without the S4 prefix. */
+	AWG_PEER_F_NO_S4 = 1U << 1,
+	__AWG_PEER_F_ALL = AWG_PEER_F_FIXED_HEADERS | AWG_PEER_F_NO_S4
+};
 
 enum wgallowedip_flag {
 	WGALLOWEDIP_F_REMOVE_ME = 1U << 0,
