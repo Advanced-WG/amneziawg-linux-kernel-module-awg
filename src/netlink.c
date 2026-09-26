@@ -201,7 +201,10 @@ static inline int parse_ipv4_prefix(const char *prefix_str, struct ipv4_prefix *
 	if (slash - prefix_str >= INET_ADDRSTRLEN)
 		return -EINVAL;
 
-	strncpy(addr_str, prefix_str, slash - prefix_str);
+	/* Bounded above; memcpy builds everywhere (strncpy is gone in 7.2,
+	 * strscpy is missing before 4.3).
+	 */
+	memcpy(addr_str, prefix_str, slash - prefix_str);
 	addr_str[slash - prefix_str] = '\0';
 
 	ret = kstrtoint(slash + 1, 10, &prefix->prefix_len);
@@ -260,7 +263,10 @@ static inline int parse_ipv6_prefix(const char *prefix_str, struct ipv6_prefix *
 	if (slash - prefix_str >= INET6_ADDRSTRLEN)
 		return -EINVAL;
 
-	strncpy(addr_str, prefix_str, slash - prefix_str);
+	/* Bounded above; memcpy builds everywhere (strncpy is gone in 7.2,
+	 * strscpy is missing before 4.3).
+	 */
+	memcpy(addr_str, prefix_str, slash - prefix_str);
 	addr_str[slash - prefix_str] = '\0';
 
 	ret = kstrtoint(slash + 1, 10, &prefix->prefix_len);

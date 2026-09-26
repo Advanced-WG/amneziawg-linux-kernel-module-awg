@@ -1419,4 +1419,33 @@ static inline char *nla_strdup(const struct nlattr *nla, gfp_t flags)
             (blake2s)((u8 *)(out), (const u8 *)(in), (const u8 *)(key), (size_t)(outlen), (size_t)(inlen), (size_t)(keylen))
 #endif
 
+/* Linux 7.1 removed ipv6_stub; ip6_dst_lookup_flow() is called directly. */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 1, 0)
+#define wg_ipv6_dst_lookup_flow(net, sk, fl6, final_dst) ip6_dst_lookup_flow(net, sk, fl6, final_dst)
+#else
+#define wg_ipv6_dst_lookup_flow(net, sk, fl6, final_dst) ipv6_stub->ipv6_dst_lookup_flow(net, sk, fl6, final_dst)
+#endif
+
+/* setup_udp_tunnel_sock() and udp_tunnel_sock_release() take a struct sock *
+ * instead of a struct socket * since 7.1.5, and distro kernels backported that
+ * under older version numbers (Proxmox 7.0.14-17-pve, Ubuntu 7.0.0-38,
+ * CachyOS), so LINUX_VERSION_CODE cannot tell. socket.c always passes a
+ * struct sock *; the socket is passed instead only when the declared
+ * prototype is the old one. No function pointer casts (kCFI-safe).
+ */
+#include <net/udp_tunnel.h>
+#define __compat_udp_tunnel_arg(fn, old_type, sk) \
+	__builtin_choose_expr(__builtin_types_compatible_p(typeof(&fn), old_type), \
+			      (sk)->sk_socket, (sk))
+#define setup_udp_tunnel_sock(net, sk, cfg) setup_udp_tunnel_sock(net, \
+	__compat_udp_tunnel_arg(setup_udp_tunnel_sock, \
+		void (*)(struct net *, struct socket *, struct udp_tunnel_sock_cfg *), sk), cfg)
+#define udp_tunnel_sock_release(sk) udp_tunnel_sock_release( \
+	__compat_udp_tunnel_arg(udp_tunnel_sock_release, void (*)(struct socket *), sk))
+
+/* Linux 7.2 warns about workqueues that are neither WQ_PERCPU nor WQ_UNBOUND. */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0)
+#define WQ_PERCPU 0
+#endif
+
 #endif /* _WG_COMPAT_H */

@@ -20,6 +20,11 @@ All changes relative to upstream [amneziawg-linux-kernel-module](https://github.
 
 ## Kernel compatibility
 
+- **compat/compat.h, socket.c** — Linux 7.1: `ipv6_stub` removed, `ip6_dst_lookup_flow()` is called directly
+- **compat/compat.h, socket.c** — `setup_udp_tunnel_sock()` / `udp_tunnel_sock_release()` take a `struct sock *` since 7.1.5 and distro kernels backported it under older versions (Proxmox 7.0.14-17-pve, Ubuntu 26.04 7.0.0-38, CachyOS — upstream [#252](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module/issues/252), PR [#250](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module/pull/250), PR [#218](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module/pull/218)); the argument is chosen from the declared prototype at compile time instead of `LINUX_VERSION_CODE`, without function pointer casts
+- **netlink.c** — Linux 7.2 removed `strncpy`; replaced with a bounded `memcpy` (upstream's `strscpy` breaks kernels < 4.3, [#251](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module/issues/251))
+- **device.c** — Linux 7.2: per-CPU workqueues pass `WQ_PERCPU`
+- **receive.c / send.c** — SIMD context only used with zinc crypto (upstream b52ea88)
 - **compat/compat.h** — blake2s API changes in kernel 6.19+ (upstream issue #158); also fixed regression on kernels 5.4–5.10 with zinc crypto
 - **compat/simd** — ARM NEON `kernel_neon_begin/end` signature change in kernel 6.19+
 
