@@ -251,7 +251,7 @@ void jp_spec_free(struct jp_spec *spec) {
 }
 
 static void jp_tags_free(struct list_head *head) {
-    struct jp_tag *tag;
+    struct jp_tag *tag, *tmp;
 
     list_for_each_entry_safe(tag, tmp, head, head) {
         jp_tag_free(tag);
