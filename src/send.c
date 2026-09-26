@@ -28,7 +28,7 @@ static void wg_packet_send_handshake_initiation(struct wg_peer *peer)
 	struct message_handshake_initiation packet;
 	struct wg_device *wg = peer->device;
 	void *buffer;
-	u16 junk_packet_count, junk_packet_size;
+	u16 junk_packet_count, junk_packet_size, junk_min, junk_max;
 	int i;
 	struct jp_spec* spec;
 
@@ -62,25 +62,31 @@ static void wg_packet_send_handshake_initiation(struct wg_peer *peer)
 		}
 	}
 
-	if (wg->jc && wg->jmax) {
+	/* jc/jmin/jmax are updated by netlink without a lock we hold here, so
+	 * read each once and never trust jmin <= jmax: the buffer is sized by
+	 * the larger bound and every draw stays inside it.
+	 */
+	junk_packet_count = READ_ONCE(wg->jc);
+	junk_min = READ_ONCE(wg->jmin);
+	junk_max = READ_ONCE(wg->jmax);
+	if (junk_min > junk_max)
+		swap(junk_min, junk_max);
+
+	if (junk_packet_count && junk_max) {
 		net_dbg_ratelimited("%s: Sending dummy junk packets to %llu (%pISpfsc)\n",
 			    peer->device->dev->name, peer->internal_id,
 			    &peer->endpoint.addr);
 
-		junk_packet_count = wg->jc;
-		buffer = kmalloc(wg->jmax, GFP_KERNEL);
-		if (unlikely(!buffer))
-		    goto skip_junk;
+		buffer = kmalloc(junk_max, GFP_KERNEL);
+		if (likely(buffer)) {
+			while (junk_packet_count-- > 0) {
+				junk_packet_size = (u16) get_random_u32_inclusive(junk_min, junk_max);
 
-		while (junk_packet_count-- > 0) {
-		    junk_packet_size = (u16) get_random_u32_inclusive(wg->jmin, wg->jmax);
-
-		    get_random_bytes(buffer, junk_packet_size);
-		    wg_socket_send_buffer_to_peer(peer, buffer, junk_packet_size, JUNK_DSCP, 0);
+				get_random_bytes(buffer, junk_packet_size);
+				wg_socket_send_buffer_to_peer(peer, buffer, junk_packet_size, JUNK_DSCP, 0);
+			}
+			kfree(buffer);
 		}
-
-		kfree(buffer);
-	skip_junk:
 	}
 
 	if (wg_noise_handshake_create_initiation(&packet, &peer->handshake, mh_genheader(&wg->headers[MSGIDX_HANDSHAKE_INIT]))) {

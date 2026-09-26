@@ -911,11 +911,38 @@ out:
 	return ret;
 }
 
+#define AWG_U16(attr, field) { attr, offsetof(struct awg_params, field) }
+
+static const struct {
+	int attr;
+	size_t offset;
+} awg_u16_attrs[] = {
+	AWG_U16(WGDEVICE_A_JC, jc),
+	AWG_U16(WGDEVICE_A_JMIN, jmin),
+	AWG_U16(WGDEVICE_A_JMAX, jmax),
+	AWG_U16(WGDEVICE_A_S1, junk_size[MSGIDX_HANDSHAKE_INIT]),
+	AWG_U16(WGDEVICE_A_S2, junk_size[MSGIDX_HANDSHAKE_RESPONSE]),
+	AWG_U16(WGDEVICE_A_S3, junk_size[MSGIDX_HANDSHAKE_COOKIE]),
+	AWG_U16(WGDEVICE_A_S4, junk_size[MSGIDX_TRANSPORT]),
+};
+
+/* Indexed by MSGIDX_* */
+static const int awg_h_attrs[] = {
+	WGDEVICE_A_H1, WGDEVICE_A_H2, WGDEVICE_A_H3, WGDEVICE_A_H4,
+};
+
+static const int awg_i_attrs[] = {
+	WGDEVICE_A_I1, WGDEVICE_A_I2, WGDEVICE_A_I3, WGDEVICE_A_I4, WGDEVICE_A_I5,
+};
+
 static int wg_set_device(struct sk_buff *skb, struct genl_info *info)
 {
 	struct wg_device *wg = lookup_interface(info->attrs, skb);
+	char *idesc[AWG_ISPEC_COUNT] = { NULL };
+	bool awg_changed = false;
+	struct awg_params awg;
 	u32 flags = 0;
-	int ret;
+	int ret, i;
 	char *str;
 
 	if (IS_ERR(wg)) {
@@ -925,6 +952,7 @@ static int wg_set_device(struct sk_buff *skb, struct genl_info *info)
 
 	rtnl_lock();
 	mutex_lock(&wg->device_update_lock);
+	wg_awg_params_get(wg, &awg);
 
 	if (info->attrs[WGDEVICE_A_FLAGS])
 		flags = nla_get_u32(info->attrs[WGDEVICE_A_FLAGS]);
@@ -956,146 +984,48 @@ static int wg_set_device(struct sk_buff *skb, struct genl_info *info)
 			goto out;
 	}
 
-	if (info->attrs[WGDEVICE_A_JC]) {
-		wg->advanced_security = true;
-		wg->jc = nla_get_u16(info->attrs[WGDEVICE_A_JC]);
+	for (i = 0; i < ARRAY_SIZE(awg_u16_attrs); ++i) {
+		if (info->attrs[awg_u16_attrs[i].attr]) {
+			*(u16 *)((u8 *)&awg + awg_u16_attrs[i].offset) =
+				nla_get_u16(info->attrs[awg_u16_attrs[i].attr]);
+			awg_changed = true;
+		}
 	}
 
-	if (info->attrs[WGDEVICE_A_JMIN]) {
-		wg->advanced_security = true;
-		wg->jmin = nla_get_u16(info->attrs[WGDEVICE_A_JMIN]);
-	}
-
-	if (info->attrs[WGDEVICE_A_JMAX]) {
-		wg->advanced_security = true;
-		wg->jmax = nla_get_u16(info->attrs[WGDEVICE_A_JMAX]);
-	}
-
-	if (info->attrs[WGDEVICE_A_S1]) {
-		wg->advanced_security = true;
-		wg->junk_size[MSGIDX_HANDSHAKE_INIT] = nla_get_u16(info->attrs[WGDEVICE_A_S1]);
-	}
-
-	if (info->attrs[WGDEVICE_A_S2]) {
-		wg->advanced_security = true;
-		wg->junk_size[MSGIDX_HANDSHAKE_RESPONSE] = nla_get_u16(info->attrs[WGDEVICE_A_S2]);
-	}
-
-	if (info->attrs[WGDEVICE_A_H1]) {
-		wg->advanced_security = true;
-		str = nla_strdup(info->attrs[WGDEVICE_A_H1], GFP_KERNEL);
+	for (i = 0; i < ARRAY_SIZE(awg_h_attrs); ++i) {
+		if (!info->attrs[awg_h_attrs[i]])
+			continue;
+		str = nla_strdup(info->attrs[awg_h_attrs[i]], GFP_KERNEL);
 		if (!str) {
 			ret = -ENOMEM;
 			goto out;
 		}
-		ret = mh_parse(&wg->headers[MSGIDX_HANDSHAKE_INIT], str);
+		ret = mh_parse(&awg.headers[i], str);
 		kfree(str);
 		if (ret)
 			goto out;
+		awg_changed = true;
 	}
 
-	if (info->attrs[WGDEVICE_A_H2]) {
-		wg->advanced_security = true;
-		str = nla_strdup(info->attrs[WGDEVICE_A_H2], GFP_KERNEL);
-		if (!str) {
+	for (i = 0; i < ARRAY_SIZE(awg_i_attrs); ++i) {
+		if (!info->attrs[awg_i_attrs[i]])
+			continue;
+		idesc[i] = nla_strdup(info->attrs[awg_i_attrs[i]], GFP_KERNEL);
+		if (!idesc[i]) {
 			ret = -ENOMEM;
 			goto out;
 		}
-		ret = mh_parse(&wg->headers[MSGIDX_HANDSHAKE_RESPONSE], str);
-		kfree(str);
+		awg_changed = true;
+	}
+
+	/* Nothing AWG-related is applied until the whole set passes validation;
+	 * a rejected request must not leave e.g. jmin > jmax active.
+	 */
+	if (awg_changed) {
+		ret = wg_awg_params_check(wg, &awg, idesc);
 		if (ret)
 			goto out;
-	}
-
-	if (info->attrs[WGDEVICE_A_H3]) {
-		wg->advanced_security = true;
-		str = nla_strdup(info->attrs[WGDEVICE_A_H3], GFP_KERNEL);
-		if (!str) {
-			ret = -ENOMEM;
-			goto out;
-		}
-		ret = mh_parse(&wg->headers[MSGIDX_HANDSHAKE_COOKIE], str);
-		kfree(str);
-		if (ret)
-			goto out;
-	}
-
-	if (info->attrs[WGDEVICE_A_H4]) {
-		wg->advanced_security = true;
-		str = nla_strdup(info->attrs[WGDEVICE_A_H4], GFP_KERNEL);
-		if (!str) {
-			ret = -ENOMEM;
-			goto out;
-		}
-		ret = mh_parse(&wg->headers[MSGIDX_TRANSPORT], str);
-		kfree(str);
-		if (ret)
-			goto out;
-	}
-
-	if (info->attrs[WGDEVICE_A_S3]) {
-		wg->advanced_security = true;
-		wg->junk_size[MSGIDX_HANDSHAKE_COOKIE] = nla_get_u16(info->attrs[WGDEVICE_A_S3]);
-	}
-
-	if (info->attrs[WGDEVICE_A_S4]) {
-		wg->advanced_security = true;
-		wg->junk_size[MSGIDX_TRANSPORT] = nla_get_u16(info->attrs[WGDEVICE_A_S4]);
-	}
-
-	if (info->attrs[WGDEVICE_A_I1]) {
-		wg->advanced_security = true;
-		str = nla_strdup(info->attrs[WGDEVICE_A_I1], GFP_KERNEL);
-		if (!str) {
-			ret = -ENOMEM;
-			goto out;
-		}
-		kfree(wg->ispecs[0].desc);
-		wg->ispecs[0].desc = str;
-	}
-
-	if (info->attrs[WGDEVICE_A_I2]) {
-		wg->advanced_security = true;
-		str = nla_strdup(info->attrs[WGDEVICE_A_I2], GFP_KERNEL);
-		if (!str) {
-			ret = -ENOMEM;
-			goto out;
-		}
-		kfree(wg->ispecs[1].desc);
-		wg->ispecs[1].desc = str;
-	}
-
-	if (info->attrs[WGDEVICE_A_I3]) {
-		wg->advanced_security = true;
-		str = nla_strdup(info->attrs[WGDEVICE_A_I3], GFP_KERNEL);
-		if (!str) {
-			ret = -ENOMEM;
-			goto out;
-		}
-		kfree(wg->ispecs[2].desc);
-		wg->ispecs[2].desc = str;
-	}
-
-	if (info->attrs[WGDEVICE_A_I4]) {
-		wg->advanced_security = true;
-		str = nla_strdup(info->attrs[WGDEVICE_A_I4], GFP_KERNEL);
-		if (!str) {
-			ret = -ENOMEM;
-			goto out;
-		}
-		kfree(wg->ispecs[3].desc);
-		wg->ispecs[3].desc = str;
-	}
-
-	if (info->attrs[WGDEVICE_A_I5]) {
-		wg->advanced_security = true;
-		str = nla_strdup(info->attrs[WGDEVICE_A_I5], GFP_KERNEL);
-		if (!str) {
-			ret = -ENOMEM;
-			goto out;
-		}
-		kfree(wg->ispecs[4].desc);
-		wg->ispecs[4].desc = str;
+		wg_awg_params_set(wg, &awg, idesc);
 	}
 
 	if (flags & WGDEVICE_F_REPLACE_PEERS)
@@ -1161,6 +1091,8 @@ out:
 	mutex_unlock(&wg->device_update_lock);
 	rtnl_unlock();
 	dev_put(wg->dev);
+	for (i = 0; i < ARRAY_SIZE(idesc); ++i)
+		kfree(idesc[i]);
 out_nodev:
 	if (info->attrs[WGDEVICE_A_PRIVATE_KEY])
 		memzero_explicit(nla_data(info->attrs[WGDEVICE_A_PRIVATE_KEY]),

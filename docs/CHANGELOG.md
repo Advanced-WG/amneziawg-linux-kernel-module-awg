@@ -4,6 +4,8 @@ All changes relative to upstream [amneziawg-linux-kernel-module](https://github.
 
 ## Bug fixes
 
+- **netlink.c / device.c** — a rejected configuration stayed active: `wg_set_device` stored Jc/Jmin/Jmax/S1–S4/H1–H4/I1–I5 into the device first and validated afterwards, so e.g. `awg set awg0 jmin 2000` (with Jmax 1000) returned EINVAL but left Jmin > Jmax in place and the next handshake overflowed the junk buffer (same crash as upstream [#254](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module/issues/254) / [#225](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module/issues/225)). AWG parameters are now staged, validated as a whole (including I1–I5 parsing) and only then committed
+- **send.c** — junk packet sizes are drawn from locally read, ordered bounds, so a concurrent reconfiguration can never make the draw exceed the buffer; removed a label at the end of a compound statement (rejected by older compilers)
 - **receive.c** — cookie reply returned wrong constant (`MESSAGE_HANDSHAKE_COOKIE` = 3 instead of `MESSAGE_COOKIE_REPLY_SIZE` = 64 bytes), causing malformed packets
 - **netlink.c** — netlink dump overflow when device has many peers; implemented resumable state machine (upstream PR #152)
 - **netlink.c** — race condition: `bogus_endpoints` module params could change via sysfs mid-dump, producing inconsistent output; now snapshotted once per dump in `dump_ctx`

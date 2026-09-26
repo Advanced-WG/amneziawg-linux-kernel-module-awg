@@ -250,10 +250,59 @@ void jp_spec_free(struct jp_spec *spec) {
     mutex_unlock(&spec->lock);
 }
 
+static void jp_tags_free(struct list_head *head) {
+    struct jp_tag *tag;
+
+    list_for_each_entry_safe(tag, tmp, head, head) {
+        jp_tag_free(tag);
+        list_del(&tag->head);
+        kfree(tag);
+    }
+}
+
+/* Total packet size and modifier count of a parsed tag list. */
+static int jp_tags_size(struct list_head *head, int *pkt_size, int *mods_size) {
+    struct jp_tag *tag;
+
+    *pkt_size = 0;
+    *mods_size = 0;
+
+    list_for_each_entry(tag, head, head) {
+        *pkt_size += tag->pkt_size;
+
+        if (tag->func)
+            ++*mods_size;
+    }
+
+    if (*pkt_size > MESSAGE_MAX_SIZE)
+        return -EINVAL;
+
+    return 0;
+}
+
+/* Checks that desc is a valid I1-I5 description without touching any spec. */
+int jp_spec_check(const char *desc) {
+    int err, pkt_size, mods_size;
+    char *buf;
+    LIST_HEAD(head);
+
+    buf = kstrdup(desc, GFP_KERNEL);
+    if (!buf)
+        return -ENOMEM;
+
+    err = jp_parse_tags(buf, &head);
+    if (!err)
+        err = jp_tags_size(&head, &pkt_size, &mods_size);
+
+    jp_tags_free(&head);
+    kfree(buf);
+    return err;
+}
+
 int jp_spec_setup(struct jp_spec *spec) {
     int err = 0;
     int pkt_size, mods_size;
-    struct jp_tag *tag, *tmp;
+    struct jp_tag *tag;
     struct jp_modifier *mod;
     char* buf;
     LIST_HEAD(head);
@@ -282,20 +331,9 @@ int jp_spec_setup(struct jp_spec *spec) {
     if (err)
         goto error;
 
-    pkt_size = 0;
-    mods_size = 0;
-
-    list_for_each_entry(tag, &head, head) {
-        pkt_size += tag->pkt_size;
-
-        if (tag->func)
-            ++mods_size;
-    }
-
-    if (pkt_size > MESSAGE_MAX_SIZE) {
-        err = -EINVAL;
+    err = jp_tags_size(&head, &pkt_size, &mods_size);
+    if (err)
         goto error;
-    }
 
     spec->pkt = kzalloc(pkt_size, GFP_KERNEL);
     spec->mods = kzalloc(mods_size * sizeof(*spec->mods), GFP_KERNEL);
@@ -331,11 +369,7 @@ error:
         spec->pkt_size = 0;
         spec->mods_size = 0;
     }
-    list_for_each_entry_safe(tag, tmp, &head, head) {
-        jp_tag_free(tag);
-        list_del(&tag->head);
-        kfree(tag);
-    }
+    jp_tags_free(&head);
     kfree(buf);
     mutex_unlock(&spec->lock);
     return err;

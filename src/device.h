@@ -22,6 +22,8 @@
 
 struct wg_device;
 
+#define AWG_ISPEC_COUNT 5
+
 struct multicore_worker {
 	void *ptr;
 	struct work_struct work;
@@ -57,7 +59,7 @@ struct wg_device {
 	u32 fwmark;
 	u16 incoming_port;
 
-	struct jp_spec ispecs[5];
+	struct jp_spec ispecs[AWG_ISPEC_COUNT];
 	struct magic_header headers[4];
 	u16 junk_size[4];
 	u16 jc;
@@ -66,8 +68,25 @@ struct wg_device {
 	bool advanced_security;
 };
 
+/* Staging copy of the AWG parameters. Netlink fills one of these, checks it
+ * with wg_awg_params_check() and only then commits it to the device, so a
+ * rejected configuration never becomes active.
+ */
+struct awg_params {
+	struct magic_header headers[4];
+	u16 junk_size[4];
+	u16 jc;
+	u16 jmin;
+	u16 jmax;
+};
+
 int wg_device_init(void);
 void wg_device_uninit(void);
+void wg_awg_params_get(const struct wg_device *wg, struct awg_params *p);
+int wg_awg_params_check(const struct wg_device *wg, struct awg_params *p,
+			char *const idesc[]);
+void wg_awg_params_set(struct wg_device *wg, const struct awg_params *p,
+		       char *idesc[]);
 int wg_device_handle_post_config(struct wg_device *wg);
 
 #endif /* _WG_DEVICE_H */

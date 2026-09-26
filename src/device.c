@@ -558,62 +558,119 @@ void wg_device_uninit(void)
 	rcu_barrier();
 }
 
-int wg_device_handle_post_config(struct wg_device *wg)
+void wg_awg_params_get(const struct wg_device *wg, struct awg_params *p)
+{
+	memcpy(p->headers, wg->headers, sizeof(p->headers));
+	memcpy(p->junk_size, wg->junk_size, sizeof(p->junk_size));
+	p->jc = wg->jc;
+	p->jmin = wg->jmin;
+	p->jmax = wg->jmax;
+}
+
+/* Validates a staged AWG configuration before it is committed. idesc holds
+ * the new I1-I5 descriptions (NULL = unchanged); the current ones were
+ * validated when they were set. May adjust p->jmax (see below).
+ */
+int wg_awg_params_check(const struct wg_device *wg, struct awg_params *p,
+			char *const idesc[])
 {
 	int err;
 	int i, j;
-
-	if (!wg->advanced_security)
-		return 0;
 
 	/* When jmin == jmax, get_random_u32_inclusive() always returns the
 	 * same value, making every junk packet identical in size. Bump jmax
 	 * by one so there are at least two possible sizes.
 	 */
-	if (wg->jc && wg->jmin == wg->jmax)
-		wg->jmax++;
+	if (p->jc && p->jmin == p->jmax)
+		p->jmax++;
 
-	if (wg->jmax >= MESSAGE_MAX_SIZE) {
+	if (p->jmax >= MESSAGE_MAX_SIZE) {
 		net_dbg_ratelimited("%s: JunkPacketMaxSize: %d; should be smaller than maxSegmentSize: %d\n",
-							wg->dev->name, wg->jmax, MESSAGE_MAX_SIZE);
+							wg->dev->name, p->jmax, MESSAGE_MAX_SIZE);
 		return -EINVAL;
 	}
 
-	if (wg->jmax && wg->jmax < wg->jmin) {
+	if (p->jmax && p->jmax < p->jmin) {
 		net_dbg_ratelimited("%s: maxSize: %d; should be greater than minSize: %d\n",
-							wg->dev->name, wg->jmax, wg->jmin);
+							wg->dev->name, p->jmax, p->jmin);
 		return -EINVAL;
 	}
 
-	if (wg->junk_size[MSGIDX_HANDSHAKE_INIT] + MESSAGE_INITIATION_SIZE > MESSAGE_MAX_SIZE) {
+	if (p->junk_size[MSGIDX_HANDSHAKE_INIT] + MESSAGE_INITIATION_SIZE > MESSAGE_MAX_SIZE) {
 		net_dbg_ratelimited("%s: S1 is too large\n", wg->dev->name);
 		return -EINVAL;
 	}
 
-	if (wg->junk_size[MSGIDX_HANDSHAKE_RESPONSE] + MESSAGE_RESPONSE_SIZE > MESSAGE_MAX_SIZE) {
+	if (p->junk_size[MSGIDX_HANDSHAKE_RESPONSE] + MESSAGE_RESPONSE_SIZE > MESSAGE_MAX_SIZE) {
 		net_dbg_ratelimited("%s: S2 is too large\n", wg->dev->name);
 		return -EINVAL;
 	}
 
-	if (wg->junk_size[MSGIDX_HANDSHAKE_COOKIE] + MESSAGE_COOKIE_REPLY_SIZE > MESSAGE_MAX_SIZE) {
+	if (p->junk_size[MSGIDX_HANDSHAKE_COOKIE] + MESSAGE_COOKIE_REPLY_SIZE > MESSAGE_MAX_SIZE) {
 		net_dbg_ratelimited("%s: S3 is too large\n", wg->dev->name);
 		return -EINVAL;
 	}
 
-	if (wg->junk_size[MSGIDX_TRANSPORT] + MESSAGE_TRANSPORT_SIZE > MESSAGE_MAX_SIZE) {
+	if (p->junk_size[MSGIDX_TRANSPORT] + MESSAGE_TRANSPORT_SIZE > MESSAGE_MAX_SIZE) {
 		net_dbg_ratelimited("%s: S4 is too large\n", wg->dev->name);
 		return -EINVAL;
 	}
 
-	for (i = 0; i < ARRAY_SIZE(wg->headers); ++i) {
-		for (j = i + 1; j < ARRAY_SIZE(wg->headers); ++j) {
-			if (!(wg->headers[j].end < wg->headers[i].start ||
-				  wg->headers[i].end < wg->headers[j].start)) {
+	for (i = 0; i < ARRAY_SIZE(p->headers); ++i) {
+		for (j = i + 1; j < ARRAY_SIZE(p->headers); ++j) {
+			if (!(p->headers[j].end < p->headers[i].start ||
+				  p->headers[i].end < p->headers[j].start)) {
 				net_dbg_ratelimited("%s: H%d and H%d ranges must not overlap\n", wg->dev->name, i + 1, j + 1);
 				return -EINVAL;
 			}
 		}
 	}
+
+	for (i = 0; i < AWG_ISPEC_COUNT; ++i) {
+		if (!idesc[i])
+			continue;
+		err = jp_spec_check(idesc[i]);
+		if (err) {
+			net_dbg_ratelimited("%s: I%d-packet invalid format\n", wg->dev->name, i + 1);
+			return err;
+		}
+	}
+
+	return 0;
+}
+
+/* Commits a configuration accepted by wg_awg_params_check(). Takes ownership
+ * of the non-NULL idesc strings and clears those slots.
+ */
+void wg_awg_params_set(struct wg_device *wg, const struct awg_params *p,
+		       char *idesc[])
+{
+	int i;
+
+	memcpy(wg->headers, p->headers, sizeof(wg->headers));
+	memcpy(wg->junk_size, p->junk_size, sizeof(wg->junk_size));
+	WRITE_ONCE(wg->jc, p->jc);
+	WRITE_ONCE(wg->jmin, p->jmin);
+	WRITE_ONCE(wg->jmax, p->jmax);
+
+	for (i = 0; i < AWG_ISPEC_COUNT; ++i) {
+		if (!idesc[i])
+			continue;
+		kfree(wg->ispecs[i].desc);
+		wg->ispecs[i].desc = idesc[i];
+		idesc[i] = NULL;
+	}
+
+	wg->advanced_security = true;
+}
+
+int wg_device_handle_post_config(struct wg_device *wg)
+{
+	int err;
+	int i;
+
+	if (!wg->advanced_security)
+		return 0;
 
 	for (i = 0; i < ARRAY_SIZE(wg->ispecs); ++i) {
 		err = jp_spec_setup(&wg->ispecs[i]);

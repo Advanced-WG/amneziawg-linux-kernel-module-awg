@@ -37,6 +37,7 @@ struct jp_spec
 };
 
 void jp_spec_free(struct jp_spec* spec);
+int jp_spec_check(const char* desc);
 int jp_spec_setup(struct jp_spec* spec);
 void jp_spec_applymods(struct jp_spec* spec, struct wg_peer* peer);
 
