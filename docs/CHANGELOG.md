@@ -36,6 +36,7 @@ Known limit: a cookie reply (only sent under load) always uses S3, since the pee
 
 ## Kernel compatibility
 
+- **compat/compat.h** — RHEL 10.2 / 10.3 (CentOS Stream 10) backported `timer_container_of`, `netif_threaded_enable` and (10.3) `sockaddr_inet`; the compat definitions are skipped there (upstream PR [#174](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module/pull/174), issue [#173](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module/issues/173))
 - **compat/compat.h, socket.c** — Linux 7.1: `ipv6_stub` removed, `ip6_dst_lookup_flow()` is called directly
 - **compat/compat.h, socket.c** — `setup_udp_tunnel_sock()` / `udp_tunnel_sock_release()` take a `struct sock *` since 7.1.5 and distro kernels backported it under older versions (Proxmox 7.0.14-17-pve, Ubuntu 26.04 7.0.0-38, CachyOS — upstream [#252](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module/issues/252), PR [#250](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module/pull/250), PR [#218](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module/pull/218)); the argument is chosen from the declared prototype at compile time instead of `LINUX_VERSION_CODE`, without function pointer casts
 - **netlink.c** — Linux 7.2 removed `strncpy`; replaced with a bounded `memcpy` (upstream's `strscpy` breaks kernels < 4.3, [#251](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module/issues/251))
