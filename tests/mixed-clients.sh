@@ -5,6 +5,7 @@
 #   c3 AWG 2.0 with ranges but without S3/S4
 #   c4 AWG 2.0 identical to the server (S3/S4 on)
 # H4 is huge on purpose so random bytes often look like a valid H4.
+# Keys go through <(cat ...): the AppArmor profile of wg on Ubuntu blocks /tmp.
 umask 077
 PINGS=${PINGS:-200}
 cleanup() { for n in srv c1 c2 c3 c4; do ip netns del $n 2>/dev/null; done; }
@@ -22,7 +23,7 @@ awg genkey > /tmp/sk; awg pubkey < /tmp/sk > /tmp/sp
 H="h1 1000-2000 h2 3000-4000 h3 5000-6000 h4 100000000-2000000000"
 J="jc 3 jmin 40 jmax 90 s1 30 s2 45"
 ip -n srv link add awgs type amneziawg
-ip netns exec srv awg set awgs private-key /tmp/sk listen-port 51000 $J s3 12 s4 8 $H \
+ip netns exec srv awg set awgs private-key <(cat /tmp/sk) listen-port 51000 $J s3 12 s4 8 $H \
 	peer $(cat /tmp/cp1) allowed-ips 10.50.0.11/32 \
 	peer $(cat /tmp/cp2) allowed-ips 10.50.0.12/32 \
 	peer $(cat /tmp/cp3) allowed-ips 10.50.0.13/32 \
@@ -33,7 +34,7 @@ client() { # n type params...
 	local n=$1 type=$2 tool=awg; shift 2
 	[ $type = wireguard ] && tool=wg
 	ip -n c$n link add t$n type $type
-	ip netns exec c$n $tool set t$n private-key /tmp/ck$n "$@" \
+	ip netns exec c$n $tool set t$n private-key <(cat /tmp/ck$n) "$@" \
 		peer $(cat /tmp/sp) allowed-ips 10.50.0.0/24 endpoint 192.168.10$n.1:51000
 	ip -n c$n addr add 10.50.0.1$n/24 dev t$n; ip -n c$n link set t$n up
 }
