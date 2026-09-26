@@ -40,8 +40,13 @@ sudo dnf install -y gcc make dkms kernel-devel kernel-headers
 
 ```shell
 sudo dnf install -y epel-release
-sudo dnf install -y gcc make dkms kernel-devel kernel-headers
+sudo dnf install -y gcc make dkms "kernel-devel-$(uname -r)" kernel-devel kernel-headers
 ```
+
+Plain `kernel-devel` installs the headers of the newest kernel in the
+repositories, which may not be the running one; `kernel-devel-$(uname -r)`
+covers the running kernel, `kernel-devel` the one you will boot next.
+Tested on AlmaLinux 10.2.
 
 ### openSUSE / SLES
 
@@ -94,6 +99,20 @@ sudo make install
 ```shell
 sudo modprobe amneziawg
 ```
+
+If this fails with `Key was rejected by service`, Secure Boot is on and the
+key DKMS signs the module with is not trusted yet. Enroll it once:
+
+```shell
+sudo mokutil --import /var/lib/dkms/mok.pub   # asks for a one-time password
+sudo reboot
+```
+
+On the next boot the blue **MOK Manager** screen appears on the console:
+choose **Enroll MOK → Continue → Yes**, enter the password and reboot. Check
+with `mokutil --test-key /var/lib/dkms/mok.pub` ("is already enrolled").
+Later DKMS rebuilds are signed with the same key. (On Ubuntu the key is
+`/var/lib/shim-signed/mok/MOK.der` and is usually enrolled at install time.)
 
 To load automatically on boot:
 
