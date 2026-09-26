@@ -260,7 +260,11 @@ static void jp_tags_free(struct list_head *head) {
     }
 }
 
-/* Total packet size and modifier count of a parsed tag list. */
+/* Total packet size and modifier count of a parsed tag list. Each tag is
+ * checked against the space still left before it is added, so the int sum
+ * cannot overflow: <r 2147483647><r 2147483647><b 0x0102> used to wrap to 0,
+ * kzalloc(0) returned ZERO_SIZE_PTR and the copy into it oopsed.
+ */
 static int jp_tags_size(struct list_head *head, int *pkt_size, int *mods_size) {
     struct jp_tag *tag;
 
@@ -268,14 +272,14 @@ static int jp_tags_size(struct list_head *head, int *pkt_size, int *mods_size) {
     *mods_size = 0;
 
     list_for_each_entry(tag, head, head) {
+        if (tag->pkt_size <= 0 || tag->pkt_size > MESSAGE_MAX_SIZE - *pkt_size)
+            return -EINVAL;
+
         *pkt_size += tag->pkt_size;
 
         if (tag->func)
             ++*mods_size;
     }
-
-    if (*pkt_size > MESSAGE_MAX_SIZE)
-        return -EINVAL;
 
     return 0;
 }
