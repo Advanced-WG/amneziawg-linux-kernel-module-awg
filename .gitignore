@@ -21,6 +21,12 @@ src/tests/qemu/distfiles/
 *.til
 .cache.mk
 src/crypto/zinc/*/*.S
+# hand-written, not generated from .pl (committed upstream too)
+!src/crypto/zinc/blake2s/blake2s-x86_64.S
+!src/crypto/zinc/chacha20/chacha20-mips.S
+!src/crypto/zinc/chacha20/chacha20-unrolled-arm.S
+!src/crypto/zinc/curve25519/curve25519-arm.S
+!src/crypto/zinc/poly1305/poly1305-mips.S
 src/amneziawg.mod
 src/generated
 src/kernel
