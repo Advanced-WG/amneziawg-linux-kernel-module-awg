@@ -1,57 +1,45 @@
 %global debug_package %{nil}
+%global srcname amneziawg-linux-kernel-module-awg
 
 Name:           amneziawg-dkms
-Version:        1.0.20241112
+Version:        1.0.20260927+awg
 Release:        1%{?dist}
 Epoch:          1
-URL:            https://www.wireguard.com/
-Summary:        Fast, modern, secure VPN tunnel
-License:        GPLv2
-Group:          System Environment/Kernel
+URL:            https://github.com/Advanced-WG/amneziawg-linux-kernel-module-awg
+Summary:        AmneziaWG VPN kernel module, patched fork (DKMS)
+License:        GPL-2.0-only
 BuildArch:      noarch
 
-Source0:        https://github.com/amnezia-vpn/amneziawg-linux-kernel-module/archive/refs/tags/v%{version}.tar.gz
+# git archive --prefix=amneziawg-linux-kernel-module-awg-<version>/ \
+#     -o amneziawg-linux-kernel-module-awg-<version>.tar.gz v<version>
+Source0:        %{srcname}-%{version}.tar.gz
 
-BuildRequires:  kernel-devel
-BuildRequires:  sed
 BuildRequires:  make
-BuildRequires:  bc
 
 Provides:       kmod(amneziawg.ko) = %{epoch}:%{version}-%{release}
 Requires:       dkms
 Requires:       kernel-devel
 Requires:       make
-Requires:       bc
-Requires:       yum-utils
-Requires:       rpm-build
-Requires:       python3-devel
-Requires:       git
+Requires:       gcc
 
 %description
-WireGuard is a novel VPN that runs inside the Linux Kernel and uses
-state-of-the-art cryptography (the "Noise" protocol). It aims to be
-faster, simpler, leaner, and more useful than IPSec, while avoiding
-the massive headache. It intends to be considerably more performant
-than OpenVPN. WireGuard is designed as a general purpose VPN for
-running on embedded interfaces and super computers alike, fit for
-many different circumstances. It runs over UDP.
+AmneziaWG is WireGuard with traffic obfuscation (junk packets, message
+padding and custom headers) against deep packet inspection. This is a
+patched fork of the AmneziaWG 2.0 kernel module: parameters are validated
+before they are applied, one interface serves plain WireGuard, AWG 1.0 and
+AWG 2.0 clients, and it builds on current kernels (up to 7.2, RHEL 10).
+
+This package uses DKMS to build the amneziawg module for installed kernels.
 
 %prep
-%autosetup -p1 -n amneziawg-linux-kernel-module-%{version}
-
-# Fix the Makefile for CentOS7 since it ships coreutils from 2013.
-sed -i 's/install .* -D -t\(.\+\) /mkdir -p \1 \&\& \0/' %{_builddir}/amneziawg-linux-kernel-module-%{version}/src/Makefile
-
-# Set version in dkms.conf and Makefile
-sed -i "s/^PACKAGE_VERSION=.*/PACKAGE_VERSION=\"%{version}\"/" %{_builddir}/amneziawg-linux-kernel-module-%{version}/src/dkms.conf
-sed -i "s/^WIREGUARD_VERSION = .*/WIREGUARD_VERSION = %{version}/" %{_builddir}/amneziawg-linux-kernel-module-%{version}/src/Makefile
+%autosetup -p1 -n %{srcname}-%{version}
 
 %build
 
 %install
-mkdir -p %{buildroot}%{_usrsrc}/amneziawg-%{version}/
-make DESTDIR=%{buildroot} DKMSDIR=%{_usrsrc}/amneziawg-%{version}/ \
-    -C %{_builddir}/amneziawg-linux-kernel-module-%{version}/src dkms-install
+# dkms.conf, the /usr/src directory and "dkms add" must use the same version.
+make -C src DESTDIR=%{buildroot} DKMSDIR=%{_usrsrc}/amneziawg-%{version} \
+    WIREGUARD_VERSION=%{version} dkms-install
 
 %post
 dkms add -m amneziawg -v %{version} -q --rpm_safe_upgrade || :
@@ -89,10 +77,10 @@ exit 0
 %{_usrsrc}/amneziawg-%{version}
 
 %changelog
-* Thu Oct 23 2024 Yuri Egorov <ye@amnezia.org> - 1.0.20241023-1
+* Wed Oct 23 2024 Yuri Egorov <ye@amnezia.org> - 1.0.20241023-1
 - Update to 1.0.20241023
 
-* Thu Oct 22 2024 Yuri Egorov <ye@amnezia.org> - 1.0.20241022-1
+* Tue Oct 22 2024 Yuri Egorov <ye@amnezia.org> - 1.0.20241022-1
 - Update to 1.0.20241022
 
 * Thu Feb 1 2024 Yuri Egorov <ye@amnezia.org> - 1.0.20240201-1

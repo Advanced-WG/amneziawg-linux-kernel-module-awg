@@ -40,6 +40,8 @@ sudo dkms install "amneziawg/$(make print-version)"
 sudo modprobe amneziawg
 ```
 
+Ready `.deb` and `.rpm` packages (DKMS) are attached to the [releases](https://github.com/Advanced-WG/amneziawg-linux-kernel-module-awg/releases) — see [Installation](docs/INSTALL.md#option-c--release-packages).
+
 To have DKMS rebuild the module after kernel updates, also install the headers meta-package (`linux-headers-amd64` on Debian, `linux-headers-generic` on Ubuntu) — see [Installation](docs/INSTALL.md#1-install-prerequisites).
 
 ## Documentation

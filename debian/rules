@@ -5,15 +5,21 @@ export DH_VERBOSE = 1
 include /usr/share/dpkg/default.mk
 
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
-export DEB_VERSION_UPSTREAM
 
-AMNEZIAWG_ARGS = V=1
+# dkms.conf, the /usr/src directory and "dkms add" must all use this version.
+MODULE_VERSION = $(DEB_VERSION_UPSTREAM)
+DKMS_SRC = /usr/src/amneziawg-$(MODULE_VERSION)
 
 %:
-	dh $@ --with dkms
+	dh $@
+
+# Nothing to build: DKMS compiles the module on the target machine.
+override_dh_auto_build:
 
 override_dh_auto_install:
-	$(MAKE) -C src DESTDIR=`pwd`/debian/amneziawg-dkms DKMSDIR=/usr/src/amneziawg-$(DEB_VERSION_UPSTREAM) dkms-install
+	$(MAKE) -C src DESTDIR=$(CURDIR)/debian/amneziawg-dkms \
+		DKMSDIR=$(DKMS_SRC) WIREGUARD_VERSION=$(MODULE_VERSION) dkms-install
 
 override_dh_dkms:
-	dh_dkms -p amneziawg-dkms -- src/dkms.conf
+	dh_dkms -p amneziawg-dkms -V $(MODULE_VERSION) -- \
+		debian/amneziawg-dkms$(DKMS_SRC)/dkms.conf

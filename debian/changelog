@@ -1,3 +1,23 @@
+amneziawg-linux-kmod (1.0.20260927+awg-1) unstable; urgency=medium
+
+  * First release of the patched fork (AmneziaWG 2.0 protocol), based on
+    upstream 26f5df0. Changes in docs/CHANGELOG.md, among them:
+  * AWG parameters are validated as a whole before anything is applied; a
+    rejected "awg set" no longer leaves invalid values active (crashes of
+    upstream #254 / #225) or a changed listen port.
+  * Plain WireGuard, AWG 1.0 and AWG 2.0 peers without S3/S4 on one
+    obfuscated interface, detected per peer and reported over netlink.
+  * A replayed old handshake initiation can no longer switch a peer to
+    unobfuscated framing.
+  * I1-I5 size overflow, use-after-free on teardown, netlink dump with
+    many peers and other upstream bugs fixed.
+  * Builds on Linux 7.1/7.2, distro kernels with the new udp_tunnel API,
+    RHEL/AlmaLinux 10.2-10.3; the zinc assembly files needed before 5.10
+    are back.
+  * Packaging: correct DKMS version in dkms.conf, debhelper compat 13.
+
+ -- Advanced-WG <237044+V-Bantserov@users.noreply.github.com>  Sun, 27 Sep 2026 20:00:00 +0300
+
 amneziawg-linux-kmod (1.0.0) unstable; urgency=medium
 
   * Initial release

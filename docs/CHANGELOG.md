@@ -71,3 +71,5 @@ Known limit: a cookie reply (only sent under load) always uses S3, since the pee
 ## Packaging
 
 - **src/crypto/zinc** — the hand-written assembly files (`blake2s-x86_64.S`, `chacha20-mips.S`, `chacha20-unrolled-arm.S`, `curve25519-arm.S`, `poly1305-mips.S`) were missing from this fork because `.gitignore` covers `*.S`; kernels before 5.10 build the bundled zinc crypto and failed on x86_64, ARM and MIPS
+- **debian/, amneziawg-dkms.spec** — packages for this fork: `dkms.conf`, the `/usr/src` directory and `dkms add` now use the same version (the version was not passed to the Makefile and `dh_dkms` read `0.0.0`), debhelper compat 13 with `dh-sequence-dkms`, the spec no longer requires git, rpm-build or python3-devel; `.gitattributes` keeps LF in Windows checkouts, since `dpkg-source` rejects `debian/` files with CRLF
+- **src/Makefile** — a checkout of a release tag builds with that version (e.g. `1.0.20260927+awg`) instead of the commit time

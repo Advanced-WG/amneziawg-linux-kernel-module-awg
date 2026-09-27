@@ -1,14 +1,14 @@
 Source: amneziawg-linux-kmod
 Section: net
 Priority: optional
-Maintainer: unidentified attacker <ua@amnezia.org>
+Maintainer: Advanced-WG <237044+V-Bantserov@users.noreply.github.com>
 Build-Depends:
- debhelper,
- dkms
-Standards-Version: 4.5.1
-Homepage: https://amnezia.org
-Vcs-Git: https://github.com/amnezia-vpn/awg-linux-kernel-module.git
-Vcs-Browser: https://github.com/amnezia-vpn/awg-linux-kernel-module
+ debhelper-compat (= 13),
+ dh-sequence-dkms,
+Standards-Version: 4.6.2
+Homepage: https://github.com/Advanced-WG/amneziawg-linux-kernel-module-awg
+Vcs-Git: https://github.com/Advanced-WG/amneziawg-linux-kernel-module-awg.git
+Vcs-Browser: https://github.com/Advanced-WG/amneziawg-linux-kernel-module-awg
 Rules-Requires-Root: no
 
 Package: amneziawg-dkms
@@ -16,18 +16,14 @@ Architecture: all
 Section: kernel
 Depends:
  ${misc:Depends},
- ${perl:Depends},
 Recommends:
- amneziawg (>= 0.0.20191219),
- amneziawg-tools (>= 0.0.20191219),
-Description: fast, modern, secure kernel VPN tunnel (DKMS version)
- WireGuard is a novel VPN that runs inside the Linux Kernel and uses
- state-of-the-art cryptography (the "Noise" protocol). It aims to be
- faster, simpler, leaner, and more useful than IPSec, while avoiding
- the massive headache. It intends to be considerably more performant
- than OpenVPN. WireGuard is designed as a general purpose VPN for
- running on embedded interfaces and super computers alike, fit for
- many different circumstances. It runs over UDP.
+ amneziawg-tools,
+Description: AmneziaWG VPN kernel module, patched fork (DKMS version)
+ AmneziaWG is WireGuard with traffic obfuscation (junk packets, message
+ padding and custom headers) against deep packet inspection. This is a
+ patched fork of the AmneziaWG 2.0 kernel module: parameters are validated
+ before they are applied, one interface serves plain WireGuard, AWG 1.0 and
+ AWG 2.0 clients, and it builds on current kernels (up to 7.2, RHEL 10).
  .
- This package uses DKMS to automatically build the wireguard kernel
- module.
+ This package uses DKMS to build the amneziawg kernel module for every
+ installed kernel.

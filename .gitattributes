@@ -1,2 +1,5 @@
+# Linux sources and packaging: LF everywhere, also in Windows checkouts and
+# in "git archive" there (dpkg-source rejects debian/ files with CRLF).
+* text=auto eol=lf
 .gitattributes export-ignore
 .gitignore export-ignore

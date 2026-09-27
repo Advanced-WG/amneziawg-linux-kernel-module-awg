@@ -1,5 +1,4 @@
 version=4
-opts=mode=git,pgpmode=gittag \
- https://github.com/amnezia-vpn/awg-linux-kernel-module.git \
- refs/tags/v?([\d\.]+)
-
+opts=mode=git \
+ https://github.com/Advanced-WG/amneziawg-linux-kernel-module-awg.git \
+ refs/tags/v?([\d\.]+\+awg)
