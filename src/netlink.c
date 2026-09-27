@@ -990,23 +990,6 @@ static int wg_set_device(struct sk_buff *skb, struct genl_info *info)
 			goto out;
 	}
 
-	++wg->device_update_gen;
-
-	if (info->attrs[WGDEVICE_A_FWMARK]) {
-		struct wg_peer *peer;
-
-		wg->fwmark = nla_get_u32(info->attrs[WGDEVICE_A_FWMARK]);
-		list_for_each_entry(peer, &wg->peer_list, peer_list)
-			wg_socket_clear_peer_endpoint_src(peer);
-	}
-
-	if (info->attrs[WGDEVICE_A_LISTEN_PORT]) {
-		ret = set_port(wg,
-			nla_get_u16(info->attrs[WGDEVICE_A_LISTEN_PORT]));
-		if (ret)
-			goto out;
-	}
-
 	for (i = 0; i < ARRAY_SIZE(awg_u16_attrs); ++i) {
 		if (info->attrs[awg_u16_attrs[i].attr]) {
 			*(u16 *)((u8 *)&awg + awg_u16_attrs[i].offset) =
@@ -1041,15 +1024,35 @@ static int wg_set_device(struct sk_buff *skb, struct genl_info *info)
 		awg_changed = true;
 	}
 
-	/* Nothing AWG-related is applied until the whole set passes validation;
-	 * a rejected request must not leave e.g. jmin > jmax active.
+	/* Nothing is applied until the whole AWG set passes validation, and it
+	 * is validated before the listen port or fwmark change: a rejected
+	 * request must not leave e.g. jmin > jmax active, or half applied.
 	 */
 	if (awg_changed) {
 		ret = wg_awg_params_check(wg, &awg, idesc);
 		if (ret)
 			goto out;
-		wg_awg_params_set(wg, &awg, idesc);
 	}
+
+	++wg->device_update_gen;
+
+	if (info->attrs[WGDEVICE_A_FWMARK]) {
+		struct wg_peer *peer;
+
+		wg->fwmark = nla_get_u32(info->attrs[WGDEVICE_A_FWMARK]);
+		list_for_each_entry(peer, &wg->peer_list, peer_list)
+			wg_socket_clear_peer_endpoint_src(peer);
+	}
+
+	if (info->attrs[WGDEVICE_A_LISTEN_PORT]) {
+		ret = set_port(wg,
+			nla_get_u16(info->attrs[WGDEVICE_A_LISTEN_PORT]));
+		if (ret)
+			goto out;
+	}
+
+	if (awg_changed)
+		wg_awg_params_set(wg, &awg, idesc);
 
 	if (flags & WGDEVICE_F_REPLACE_PEERS)
 		wg_peer_remove_all(wg);
