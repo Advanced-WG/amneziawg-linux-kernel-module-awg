@@ -39,7 +39,9 @@ static const size_t awg_message_sizes[] = {
 static bool awg_header_at(struct sk_buff *skb, struct wg_device *wg, int idx,
 			  unsigned int junk)
 {
-	return mh_validate(*(__le32 *)(skb->data + junk), &wg->headers[idx]);
+	/* data + junk is unaligned for most S values */
+	return mh_validate(get_unaligned((__le32 *)(skb->data + junk)),
+			   &wg->headers[idx]);
 }
 
 /* Is the receiver index of a transport header at data one of our keypairs? */
@@ -51,7 +53,7 @@ static bool awg_known_keypair(struct wg_device *wg, const u8 *data)
 
 	entry = wg_index_hashtable_lookup(wg->index_hashtable,
 					  INDEX_HASHTABLE_KEYPAIR,
-					  msg->key_idx, &peer);
+					  get_unaligned(&msg->key_idx), &peer);
 	wg_peer_put(peer);
 	return entry != NULL;
 }
@@ -83,6 +85,10 @@ static size_t prepare_awg_message(struct sk_buff *skb, struct wg_device *wg)
 								wg->dev->name, skb);
 		return 0;
 	}
+
+	/* Every check below reads at least a message type. */
+	if (unlikely(skb->len < sizeof(struct message_header)))
+		return 0;
 
 	for (idx = MSGIDX_HANDSHAKE_INIT; idx <= MSGIDX_HANDSHAKE_COOKIE; ++idx) {
 		unsigned int junk = wg->junk_size[idx];

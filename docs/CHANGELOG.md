@@ -4,6 +4,7 @@ All changes relative to upstream [amneziawg-linux-kernel-module](https://github.
 
 ## Bug fixes
 
+- **noise.c** — a replayed handshake initiation switched how the server frames packets for the peer: `advanced_security` (and `fixed_headers`) were set before the timestamp replay and flood checks. Replaying an old plain-WireGuard initiation of a client that now uses AWG made the server send it plain WireGuard packets, which the client accepts, so obfuscation was silently off until its next handshake. They are now set only for an accepted initiation (`tests/replay-framing.sh`)
 - **netlink.c / device.c** — a rejected configuration stayed active: `wg_set_device` stored Jc/Jmin/Jmax/S1–S4/H1–H4/I1–I5 into the device first and validated afterwards, so e.g. `awg set awg0 jmin 2000` (with Jmax 1000) returned EINVAL but left Jmin > Jmax in place and the next handshake overflowed the junk buffer (same crash as upstream [#254](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module/issues/254) / [#225](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module/issues/225)). AWG parameters are now staged, validated as a whole (including I1–I5 parsing) and only then committed
 - **send.c** — junk packet sizes are drawn from locally read, ordered bounds, so a concurrent reconfiguration can never make the draw exceed the buffer; removed a label at the end of a compound statement (rejected by older compilers)
 - **junk.c** — integer overflow in the I1–I5 size sum: `<r 2147483647><r 2147483647><b 0x0102>` wrapped to 0, `kzalloc(0)` returned `ZERO_SIZE_PTR` and the copy into it oopsed; every tag is now checked against the space left (≤ 65535 bytes in total), like upstream PR [#247](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module/pull/247)
@@ -31,6 +32,8 @@ An obfuscated interface serves, at the same time, plain WireGuard peers (upstrea
 - **peer.c / device.c** — peers default to the device's obfuscation, also when it is switched on after the peers were added
 - Nothing to configure: the per-peer state is detected automatically, so the per-peer netlink settings proposed in #165/#170 (not in upstream, even in 3.x) are not needed
 - **tests/mixed-clients.sh** — one server and four kinds of clients in network namespaces
+- **receive.c** — headers at the S1–S4 offset and the receiver index are read with `get_unaligned()`; packets shorter than a message header are dropped before any header is read
+- **tests/replay-framing.sh** — a replayed old initiation must not change the framing of a peer
 
 Known limit: a cookie reply (only sent under load) always uses S3, since the peer is unknown at that point.
 
@@ -63,3 +66,8 @@ Known limit: a cookie reply (only sent under load) always uses S3, since the pee
 
 - **dkms.conf** — added `MAKE` and `CLEAN` directives (DKMS failed to rebuild on kernel update without them)
 - **Makefile** — auto-versioning from git commit timestamp (`1.0.YYYYMMDD-HH.MM-awg`)
+
+
+## Packaging
+
+- **src/crypto/zinc** — the hand-written assembly files (`blake2s-x86_64.S`, `chacha20-mips.S`, `chacha20-unrolled-arm.S`, `curve25519-arm.S`, `poly1305-mips.S`) were missing from this fork because `.gitignore` covers `*.S`; kernels before 5.10 build the bundled zinc crypto and failed on x86_64, ARM and MIPS
