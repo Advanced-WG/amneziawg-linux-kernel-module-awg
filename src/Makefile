@@ -4,7 +4,7 @@
 
 # A tagged release (v1.0.20260927+awg) is that version; anything else is
 # stamped with its commit time. Packages pass WIREGUARD_VERSION explicitly.
-WIREGUARD_VERSION := $(shell v=$$(git describe --tags --exact-match --match 'v*' 2>/dev/null) && echo "$${v\#v}" || git log -1 --format='1.0.%cd-awg' --date=format:'%Y%m%d-%H.%M' 2>/dev/null || echo 1.0.0-awg)
+WIREGUARD_VERSION := $(shell git describe --tags --exact-match --match 'v*' 2>/dev/null | sed 's/^v//' | grep . || git log -1 --format='1.0.%cd-awg' --date=format:'%Y%m%d-%H.%M' 2>/dev/null || echo 1.0.0-awg)
 OMIT_ENDPOINTS ?=
 
 KERNELRELEASE ?= $(shell uname -r)
