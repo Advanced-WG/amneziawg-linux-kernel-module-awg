@@ -29,12 +29,14 @@ An obfuscated interface serves, at the same time, plain WireGuard peers (upstrea
 - **noise.c / send.c** — plain framing is detected from how the initiation actually arrived, not from its type value, so interfaces with standard H1–H4 and custom S1/S2 also work with plain WireGuard peers; I1–I5, junk packets and S1–S4 are only sent to AWG peers
 - **send.c** — AWG 1.0 peers (initiation header equal to the H1 range start) get the range starts for all headers
 - **peer.c / device.c** — peers default to the device's obfuscation, also when it is switched on after the peers were added
-- No UAPI change: the per-peer state is detected automatically and not exported (the new netlink attributes of #165/#170 are not in upstream, even in 3.x)
+- Nothing to configure: the per-peer state is detected automatically, so the per-peer netlink settings proposed in #165/#170 (not in upstream, even in 3.x) are not needed
 - **tests/mixed-clients.sh** — one server and four kinds of clients in network namespaces
 
-- **netlink.c / uapi** — `WGPEER_A_AWG_PEER_FLAGS` (NLA_U32, read-only) reports for every peer of an obfuscated device what it was detected to support: `AWG_PEER_F_FIXED_HEADERS` (AWG 1.0), `AWG_PEER_F_NO_S4`; with `WGPEER_A_ADVANCED_SECURITY` absent it marks a plain WireGuard peer. One attribute (number 12) so the divergence from upstream stays small; tools that do not know it ignore it
-
 Known limit: a cookie reply (only sent under load) always uses S3, since the peer is unknown at that point.
+
+## Userspace API
+
+- **netlink.c / uapi** — `WGPEER_A_AWG_PEER_FLAGS` (NLA_U32, read-only) reports for every peer of an obfuscated device what it was detected to support: `AWG_PEER_F_FIXED_HEADERS` (AWG 1.0), `AWG_PEER_F_NO_S4`; with `WGPEER_A_ADVANCED_SECURITY` absent it marks a plain WireGuard peer. One attribute (number 12) so the divergence from upstream stays small; tools that do not know it ignore it
 
 ## Kernel compatibility
 

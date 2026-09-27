@@ -7,6 +7,20 @@ echo "module amneziawg +p" | sudo tee /sys/kernel/debug/dynamic_debug/control
 dmesg -wT
 ```
 
+## `awg set` / `awg-quick up` fails with "Invalid argument"
+
+The module rejected the AWG parameters and kept the previous ones. The limits and rules are in [Configuration](CONFIGURATION.md#awg-parameters). With debug logging on (see above), the kernel log names the reason:
+
+```
+amneziawg: awg0: maxSize: 50; should be greater than minSize: 100
+amneziawg: awg0: H1 and H2 ranges must not overlap
+amneziawg: awg0: I1-packet invalid format
+```
+
+## `modprobe` fails with "Key was rejected by service"
+
+Secure Boot is on and the DKMS signing key is not enrolled yet — see [Installation](INSTALL.md#3-load-the-module).
+
 ## DKMS build fails after kernel update
 
 Make sure headers for the new kernel are installed:
