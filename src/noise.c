@@ -638,8 +638,6 @@ wg_noise_handshake_consume_initiation(struct message_handshake_initiation *src,
 		goto out;
 	}
 	handshake = &peer->handshake;
-	peer->advanced_security = advanced_security;
-	peer->fixed_headers = fixed_headers;
 
 	/* ss */
 	if (!mix_precomputed_dh(chaining_key, key,
@@ -673,6 +671,12 @@ wg_noise_handshake_consume_initiation(struct message_handshake_initiation *src,
 	if ((s64)(handshake->last_initiation_consumption - initiation_consumption) < 0)
 		handshake->last_initiation_consumption = initiation_consumption;
 	handshake->state = HANDSHAKE_CONSUMED_INITIATION;
+	/* Only an accepted initiation may change how we frame packets for the
+	 * peer: a replayed old one (framing and all, mac1 covers the header)
+	 * is dropped above and must not switch it back.
+	 */
+	WRITE_ONCE(peer->advanced_security, advanced_security);
+	WRITE_ONCE(peer->fixed_headers, fixed_headers);
 	up_write(&handshake->lock);
 	ret_peer = peer;
 
