@@ -51,6 +51,9 @@ Known limit: a cookie reply (only sent under load) always uses S3, since the pee
 - **receive.c / send.c** — SIMD context only used with zinc crypto (upstream b52ea88)
 - **compat/compat.h** — blake2s API changes in kernel 6.19+ (upstream issue #158); also fixed regression on kernels 5.4–5.10 with zinc crypto
 - **compat/simd** — ARM NEON `kernel_neon_begin/end` signature change in kernel 6.19+
+- **compat/Kbuild.include, compat.h** — did not build on current RHEL 8.10 (4.18.0-553), RHEL 9.8 (5.14.0-687) and CentOS Stream 10 (6.12.0-271, the next RHEL 10): those kernels backported `netif_napi_add_weight`, the `headers` struct group in `sk_buff`, `timer_delete`, `timer_container_of`, `netif_set_tso_max_size`, `dev_sw_netstats_rx_add`, `skb_queue_empty_lockless`, `NLA_POLICY_MASK`, `ktime_get_coarse_boottime_ns` and `struct rtnl_newlink_params`, so the compat copies clashed. These are now detected from the kernel headers instead of `LINUX_VERSION_CODE` and RHEL/Ubuntu exceptions
+- **main.c** — kernels < 5.10 (zinc crypto) failed with implicit declarations of `chacha20_mod_init()` and the other zinc init functions; `crypto/zinc.h` is now included
+- **compat/compat.h** — Ubuntu 18.04 (4.15.0-213) backported the in-kernel blake2s, `rng_is_initialized` and `le32_to_cpu_array`; it now uses the renamed zinc crypto like the 4.19/5.4 stable kernels
 
 ## Performance & code quality
 
@@ -64,6 +67,7 @@ Known limit: a cookie reply (only sent under load) always uses S3, since the pee
 
 ## Build & deployment
 
+- **tests/compile-matrix.sh** — builds the module with `-Werror` against the kernel headers of AlmaLinux 8/9/10, CentOS Stream 10, Ubuntu 18.04–26.04 (including HWE kernels) and Debian 10–sid, each in a clean podman container with the distribution's own gcc (18 kernels, 4.15 to 7.2)
 - **dkms.conf** — added `MAKE` and `CLEAN` directives (DKMS failed to rebuild on kernel update without them)
 - **Makefile** — auto-versioning from git commit timestamp (`1.0.YYYYMMDD-HH.MM-awg`)
 
