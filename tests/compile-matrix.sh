@@ -5,6 +5,9 @@
 #
 #   tests/compile-matrix.sh              all targets
 #   tests/compile-matrix.sh alma8 deb12  only these
+#   PACKAGES=1 tests/compile-matrix.sh   also build the .deb/.rpm from
+#                                        HEAD, install them on every
+#                                        target and run "dkms build"
 #
 # Needs podman (or docker, via ENGINE=docker). Containers use the host
 # network, since a host firewall (ufw) often drops the container bridge.
@@ -29,7 +32,7 @@ TARGETS=(
 	"noble     docker.io/library/ubuntu:24.04    apt linux-headers-generic linux-headers-generic-hwe-24.04"
 	"resolute  docker.io/library/ubuntu:26.04    apt linux-headers-generic"
 	"deb10     docker.io/library/debian:10       apt linux-headers-amd64"
-	"deb11     docker.io/library/debian:11       apt linux-headers-amd64"
+	"deb11     docker.io/debian/eol:bullseye     apt linux-headers-amd64"
 	"deb12     docker.io/library/debian:12       apt linux-headers-amd64"
 	"deb13     docker.io/library/debian:13       apt linux-headers-amd64"
 	"sid       docker.io/library/debian:sid      apt linux-headers-amd64"
@@ -46,17 +49,17 @@ if [ "$pm" = dnf ]; then
 	dirs=$(ls -d /usr/src/kernels/*/ 2>/dev/null)
 else
 	export DEBIAN_FRONTEND=noninteractive
-	# Releases past their LTS live on archive.debian.org only.
 	. /etc/os-release
-	# buster is on archive.debian.org only; bullseye's security pool no
-	# longer holds the packages its index lists.
+	# buster is on archive.debian.org only. bullseye's security pool lists
+	# kernel packages it no longer holds: take the kernel from main.
 	case $VERSION_CODENAME in
 	buster)
 		rm -f /etc/apt/sources.list.d/*
 		echo "deb http://archive.debian.org/debian buster main" > /etc/apt/sources.list
 		echo "deb http://archive.debian.org/debian-security buster/updates main" >> /etc/apt/sources.list ;;
 	bullseye)
-		sed -i '/security/d' /etc/apt/sources.list ;;
+		printf 'Package: linux-*\nPin: release l=Debian-Security\nPin-Priority: -1\n' \
+			> /etc/apt/preferences.d/no-security-kernel ;;
 	esac
 	{ apt-get -qq -o Acquire::Check-Valid-Until=false update; apt-get -y -qq install --no-install-recommends gcc make "$@"; } >/dev/null 2>&1 \
 		|| { echo "SETUP-FAILED"; apt-get -y install --no-install-recommends "$@" 2>&1 | tail -5; exit 2; }
@@ -79,9 +82,56 @@ for d in $dirs; do
 		grep -E 'error|warning' "/out/$kr.log" | head -5 | sed 's/^/     /'
 	fi
 done
-[ -n "$dirs" ] || { echo "NO-HEADERS"; rc=2; }
+[ -n "$dirs" ] || { echo "NO-HEADERS"; exit 2; }
+[ "${PACKAGES:-0}" = 1 ] || exit $rc
+if [ "${VERSION_CODENAME:-}" = bullseye ]; then
+	echo "SKIP package: the bullseye security pool is missing packages its index lists"
+	exit $rc
+fi
+
+# Install the release package the way a user does, then let DKMS build it.
+if [ "$pm" = dnf ]; then
+	{ dnf -y install epel-release && dnf -y install /pkg/amneziawg-dkms-*.rpm; } > /out/package.log 2>&1
+else
+	apt-get -y install --no-install-recommends /pkg/amneziawg-dkms_*_all.deb > /out/package.log 2>&1
+fi
+if [ $? -ne 0 ]; then
+	echo "FAIL package install"; tail -5 /out/package.log | sed 's/^/     /'
+	exit 1
+fi
+V=$(ls /usr/src | sed -n 's/^amneziawg-//p' | head -1)
+echo "OK   package $V (dkms $(dkms --version | grep -o '[0-9][0-9.]*' | head -1))"
+for d in $dirs; do
+	kr=$(basename "$d"); kr=${kr#linux-headers-}
+	if dkms build -m amneziawg -v "$V" -k "$kr" --kernelsourcedir "$d" > "/out/dkms-$kr.log" 2>&1; then
+		echo "OK   dkms $kr"
+	else
+		echo "FAIL dkms $kr"; rc=1
+		tail -5 "/out/dkms-$kr.log" | sed 's/^/     /'
+	fi
+done
 exit $rc
 EOF
+
+# The .deb is built on Debian 13 and the .rpm on AlmaLinux 10, as for a
+# release; every target then installs one of them.
+PKG=()
+if [ "${PACKAGES:-0}" = 1 ]; then
+	V=$(sed -n 's/^Version: *//p' amneziawg-dkms.spec)
+	rm -rf "$OUT/pkg" && mkdir -p "$OUT/pkg"
+	git archive --prefix="amneziawg-linux-kernel-module-awg-$V/" 		-o "$OUT/pkg/amneziawg-linux-kernel-module-awg-$V.tar.gz" HEAD || exit 1
+	echo "=== building packages $V"
+	$ENGINE run --rm --network=host -v "$OUT/pkg:/pkg:Z" docker.io/library/debian:13 bash -c '
+		export DEBIAN_FRONTEND=noninteractive
+		apt-get -qq update && apt-get -y -qq install --no-install-recommends 			build-essential debhelper dh-dkms && cd /tmp && tar xzf /pkg/*.tar.gz &&
+		cd amneziawg-* && dpkg-buildpackage -us -uc -b && cp ../*.deb /pkg/' 		> "$OUT/pkg/deb.log" 2>&1 || { echo "FAIL .deb build"; tail -5 "$OUT/pkg/deb.log"; exit 1; }
+	$ENGINE run --rm --network=host -v "$OUT/pkg:/pkg:Z" docker.io/library/almalinux:10 bash -c '
+		dnf -y install rpm-build make tar gzip && mkdir -p ~/rpmbuild/SOURCES &&
+		cp /pkg/*.tar.gz ~/rpmbuild/SOURCES/ && cd /tmp && tar xzf /pkg/*.tar.gz &&
+		rpmbuild -bb amneziawg-*/amneziawg-dkms.spec && cp ~/rpmbuild/RPMS/noarch/*.rpm /pkg/' 		> "$OUT/pkg/rpm.log" 2>&1 || { echo "FAIL .rpm build"; tail -5 "$OUT/pkg/rpm.log"; exit 1; }
+	ls "$OUT/pkg" | grep -E '\.(deb|rpm)$'
+	PKG=(-v "$OUT/pkg:/pkg:ro,Z")
+fi
 
 want=" $* "
 fail=0
@@ -90,8 +140,8 @@ for t in "${TARGETS[@]}"; do
 	[ $# -eq 0 ] || [[ $want == *" $name "* ]] || continue
 	mkdir -p "$OUT/$name"
 	echo "=== $name ($image)"
-	$ENGINE run --rm --network=host -e JOBS="$JOBS" \
-		-v "$PWD/src:/src:ro,Z" -v "$OUT/$name:/out:Z" \
+	$ENGINE run --rm --network=host -e JOBS="$JOBS" -e PACKAGES="${PACKAGES:-0}" \
+		-v "$PWD/src:/src:ro,Z" -v "$OUT/$name:/out:Z" "${PKG[@]}" \
 		"$image" bash -c "$INNER" inner "$pm" $pkgs \
 		| tee "$OUT/$name/summary.txt"
 	[ "${PIPESTATUS[0]}" -eq 0 ] || fail=1

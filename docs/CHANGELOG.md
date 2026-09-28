@@ -67,7 +67,7 @@ Known limit: a cookie reply (only sent under load) always uses S3, since the pee
 
 ## Build & deployment
 
-- **tests/compile-matrix.sh** — builds the module with `-Werror` against the kernel headers of AlmaLinux 8/9/10, CentOS Stream 10, Ubuntu 18.04–26.04 (including HWE kernels) and Debian 10–sid, each in a clean podman container with the distribution's own gcc (18 kernels, 4.15 to 7.2)
+- **tests/compile-matrix.sh** — builds the module with `-Werror` against the kernel headers of AlmaLinux 8/9/10, CentOS Stream 10, Ubuntu 18.04–26.04 (including HWE kernels) and Debian 10–sid, each in a clean podman container with the distribution's own gcc (17 kernels, 4.15 to 7.2); with PACKAGES=1 it also installs the .deb/.rpm on each and runs `dkms build`
 - **dkms.conf** — added `MAKE` and `CLEAN` directives (DKMS failed to rebuild on kernel update without them)
 - **Makefile** — auto-versioning from git commit timestamp (`1.0.YYYYMMDD-HH.MM-awg`)
 
