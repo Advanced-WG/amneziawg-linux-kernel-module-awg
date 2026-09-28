@@ -1,3 +1,13 @@
+amneziawg-linux-kmod (1.0.20260928+awg-1) unstable; urgency=medium
+
+  * Builds on current RHEL/AlmaLinux 8.10 and 9.8 and CentOS Stream 10:
+    backported kernel APIs are detected from the headers instead of the
+    kernel version.
+  * Builds on kernels older than 5.10 (zinc crypto) and Ubuntu 18.04.
+  * tests/compile-matrix.sh: 18 distribution kernels, 4.15 to 7.2.
+
+ -- Advanced-WG <237044+V-Bantserov@users.noreply.github.com>  Mon, 28 Sep 2026 23:30:00 +0300
+
 amneziawg-linux-kmod (1.0.20260927+awg-1) unstable; urgency=medium
 
   * First release of the patched fork (AmneziaWG 2.0 protocol), based on

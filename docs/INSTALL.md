@@ -100,10 +100,10 @@ The [releases](https://github.com/Advanced-WG/amneziawg-linux-kernel-module-awg/
 
 ```shell
 # Debian / Ubuntu
-sudo apt install ./amneziawg-dkms_1.0.20260927+awg-1_all.deb
+sudo apt install ./amneziawg-dkms_1.0.20260928+awg-1_all.deb
 
 # RHEL / AlmaLinux / Rocky / Fedora
-sudo dnf install ./amneziawg-dkms-1.0.20260927+awg-1.el10.noarch.rpm
+sudo dnf install ./amneziawg-dkms-1.0.20260928+awg-1.el10.noarch.rpm
 ```
 
 Removing the package removes the module from DKMS again. They replace the upstream `amneziawg-dkms` package, so do not install both.
@@ -143,14 +143,14 @@ lsmod | grep amneziawg    # should show the loaded module
 
 ## Building the packages
 
-From a checkout of the release tag (`git checkout v1.0.20260927+awg`):
+From a checkout of the release tag (`git checkout v1.0.20260928+awg`):
 
 ```shell
 # .deb (Debian/Ubuntu: apt install dpkg-dev debhelper dh-dkms)
 dpkg-buildpackage -us -uc -b          # -> ../amneziawg-dkms_<version>-1_all.deb
 
 # .rpm (RHEL-like: dnf install rpm-build)
-V=1.0.20260927+awg
+V=1.0.20260928+awg
 mkdir -p ~/rpmbuild/SOURCES
 git archive --prefix=amneziawg-linux-kernel-module-awg-$V/ \
     -o ~/rpmbuild/SOURCES/amneziawg-linux-kernel-module-awg-$V.tar.gz v$V

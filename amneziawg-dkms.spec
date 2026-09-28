@@ -2,7 +2,7 @@
 %global srcname amneziawg-linux-kernel-module-awg
 
 Name:           amneziawg-dkms
-Version:        1.0.20260927+awg
+Version:        1.0.20260928+awg
 Release:        1%{?dist}
 Epoch:          1
 URL:            https://github.com/Advanced-WG/amneziawg-linux-kernel-module-awg

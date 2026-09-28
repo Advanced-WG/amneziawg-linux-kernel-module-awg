@@ -2,7 +2,7 @@
 #
 # Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
 
-# A tagged release (v1.0.20260927+awg) is that version; anything else is
+# A tagged release (v1.0.20260928+awg) is that version; anything else is
 # stamped with its commit time. Packages pass WIREGUARD_VERSION explicitly.
 WIREGUARD_VERSION := $(shell git describe --tags --exact-match --match 'v*' 2>/dev/null | sed 's/^v//' | grep . || git log -1 --format='1.0.%cd-awg' --date=format:'%Y%m%d-%H.%M' 2>/dev/null || echo 1.0.0-awg)
 OMIT_ENDPOINTS ?=
