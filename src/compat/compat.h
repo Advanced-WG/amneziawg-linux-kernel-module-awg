@@ -331,7 +331,7 @@ static inline int wait_for_random_bytes(void)
 }
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0) && LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0) || LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 285)) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0) || LINUX_VERSION_CODE < KERNEL_VERSION(4, 9, 320)) && !defined(ISRHEL8)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0) && LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0) || LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 285)) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0) || LINUX_VERSION_CODE < KERNEL_VERSION(4, 9, 320)) && !defined(ISRHEL8) && !defined(COMPAT_HAS_RNG_IS_INITIALIZED)
 #include <linux/random.h>
 #include <linux/slab.h>
 struct rng_is_initialized_callback {
@@ -420,6 +420,7 @@ static inline u64 __compat_jiffies64_to_nsecs(u64 j)
 }
 #define jiffies64_to_nsecs __compat_jiffies64_to_nsecs
 #endif
+#ifndef COMPAT_HAS_KTIME_GET_COARSE_BOOTTIME_NS
 static inline u64 ktime_get_coarse_boottime_ns(void)
 {
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 17, 0)
@@ -430,6 +431,7 @@ static inline u64 ktime_get_coarse_boottime_ns(void)
 	return ktime_to_ns(ktime_get_coarse_boottime());
 #endif
 }
+#endif
 #endif
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 14, 0)
@@ -732,7 +734,7 @@ static inline void *skb_put_data(struct sk_buff *skb, const void *data, unsigned
 #endif
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 17, 0) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0) || LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 285)) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0) || LINUX_VERSION_CODE < KERNEL_VERSION(4, 9, 320))
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 17, 0) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0) || LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 285)) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0) || LINUX_VERSION_CODE < KERNEL_VERSION(4, 9, 320)) && !defined(COMPAT_HAS_LE32_TO_CPU_ARRAY)
 static inline void le32_to_cpu_array(u32 *buf, unsigned int words)
 {
 	while (words--) {
@@ -903,7 +905,7 @@ static inline void skb_mark_not_on_list(struct sk_buff *skb)
 #endif
 #endif
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 200) || (LINUX_VERSION_CODE < KERNEL_VERSION(4, 20, 0) && LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 249)) || (LINUX_VERSION_CODE < KERNEL_VERSION(4, 15, 0) && LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 285)) || (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0) && LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 320))) && LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0) && !defined(ISUBUNTU2004)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 200) || (LINUX_VERSION_CODE < KERNEL_VERSION(4, 20, 0) && LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 249)) || (LINUX_VERSION_CODE < KERNEL_VERSION(4, 15, 0) && LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 285)) || (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0) && LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 320)) || defined(ISUBUNTU1804)) && LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0) && !defined(ISUBUNTU2004)
 #define COMPAT_INIT_CRYPTO
 #define blake2s_init zinc_blake2s_init
 #define blake2s_init_key zinc_blake2s_init_key
@@ -1252,10 +1254,6 @@ static inline u32 get_random_u32_inclusive(u32 floor, u32 ceil)
 }
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0) && !defined(ISRHEL9)
-#define COMPAT_NETIF_HAS_WEIGHT
-#endif
-
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
 #define COMPAT_GENL_HAS_RESV_START_OP
 #endif
@@ -1271,10 +1269,6 @@ static inline u32 get_random_u32_inclusive(u32 floor, u32 ceil)
 #define DEV_STATS_ADD(DEV, FIELD, VAL) DEV->stats.FIELD += VAL
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 17, 0) && !defined(ISRHEL9)
-#define COMPAT_SKB_HAS_SKB_START
-#endif
-
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0)
 #define dev_get_tstats64 ip_tunnel_get_stats64
 #endif
@@ -1283,7 +1277,7 @@ static inline u32 get_random_u32_inclusive(u32 floor, u32 ceil)
 #define COMPAT_NETDEV_HAS_LLTX_PARAM
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 6, 0)
+#ifndef COMPAT_HAS_DEV_SW_NETSTATS_RX_ADD
 #include <linux/if.h>
 #include <linux/if_tunnel.h>
 static inline void dev_sw_netstats_rx_add(struct net_device *dev, unsigned int len) {
@@ -1297,7 +1291,7 @@ static inline void dev_sw_netstats_rx_add(struct net_device *dev, unsigned int l
 }
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 91) && !defined(ISUBUNTU2004) && !defined(ISUBUNTU2204) && !defined(ISRHEL9)
+#ifndef COMPAT_HAS_TIMER_DELETE
 #include <linux/timer.h>
 static inline int timer_delete(struct timer_list *timer)
 {
@@ -1305,7 +1299,7 @@ static inline int timer_delete(struct timer_list *timer)
 }
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 16, 0) && (!defined(ISRHEL10) || defined(ISRHEL100) || defined(ISRHEL101))
+#ifndef COMPAT_HAS_TIMER_CONTAINER_OF
 #define timer_container_of from_timer
 #endif
 
@@ -1332,8 +1326,8 @@ static inline void netif_threaded_enable(struct net_device *dev) { }
 #define COMPAT_CANNOT_USE_PCPU_STAT_TYPE
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 15, 0)
-#define COMPAT_CANNOT_USE_RTNL_NEWLINK_PARAMS
+/* Kbuild.include checks the header: RHEL 10.3 backported it to 6.12. */
+#ifdef COMPAT_CANNOT_USE_RTNL_NEWLINK_PARAMS
 struct rtnl_newlink_params {
 	struct net *src_net;
 	struct net *link_net;
@@ -1353,7 +1347,7 @@ static inline int register_random_vmfork_notifier(struct notifier_block *nb) { r
 static inline int unregister_random_vmfork_notifier(struct notifier_block *nb) { return 0; }
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 19, 0) && !defined(ISRHEL9)
+#ifndef COMPAT_HAS_NETIF_SET_TSO_MAX_SIZE
 #include <linux/netdevice.h>
 static inline void netif_set_tso_max_size(struct net_device *dev, unsigned int size) {}
 #endif
@@ -1362,14 +1356,14 @@ static inline void netif_set_tso_max_size(struct net_device *dev, unsigned int s
 #define __nonstring
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0)
+#ifndef COMPAT_HAS_SKB_QUEUE_EMPTY_LOCKLESS
 static inline bool skb_queue_empty_lockless(const struct sk_buff_head *list)
 {
 	return READ_ONCE(list->next) == (const struct sk_buff *) list;
 }
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0)
+#ifndef COMPAT_HAS_NLA_POLICY_MASK
 #define NLA_POLICY_MASK(tp, _mask) { .type = tp }
 #endif
 

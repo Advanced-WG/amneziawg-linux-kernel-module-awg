@@ -54,6 +54,46 @@ ifeq ($(shell grep -s -F "addr_gen_mode" "$(srctree)/include/linux/ipv6.h"),)
 ccflags-y += -DCOMPAT_CANNOT_USE_DEV_CNF
 endif
 
+ifeq ($(shell grep -s -F "struct rtnl_newlink_params {" "$(srctree)/include/net/rtnetlink.h"),)
+ccflags-y += -DCOMPAT_CANNOT_USE_RTNL_NEWLINK_PARAMS
+endif
+
+# Enterprise kernels (RHEL 8/9/10, Ubuntu) backport these, so look at the
+# headers instead of trusting the version number.
+ifeq ($(shell grep -s -F "netif_napi_add_weight" "$(srctree)/include/linux/netdevice.h"),)
+ccflags-y += -DCOMPAT_NETIF_HAS_WEIGHT
+endif
+ifeq ($(shell grep -s -E "struct_group.headers" "$(srctree)/include/linux/skbuff.h"),)
+ccflags-y += -DCOMPAT_SKB_HAS_SKB_START
+endif
+ifneq ($(shell grep -s -E "int timer_delete.struct timer_list" "$(srctree)/include/linux/timer.h"),)
+ccflags-y += -DCOMPAT_HAS_TIMER_DELETE
+endif
+ifneq ($(shell grep -s -F "define timer_container_of" "$(srctree)/include/linux/timer.h"),)
+ccflags-y += -DCOMPAT_HAS_TIMER_CONTAINER_OF
+endif
+ifneq ($(shell grep -s -F "void netif_set_tso_max_size" "$(srctree)/include/linux/netdevice.h"),)
+ccflags-y += -DCOMPAT_HAS_NETIF_SET_TSO_MAX_SIZE
+endif
+ifneq ($(shell grep -s -F "dev_sw_netstats_rx_add" "$(srctree)/include/linux/netdevice.h"),)
+ccflags-y += -DCOMPAT_HAS_DEV_SW_NETSTATS_RX_ADD
+endif
+ifneq ($(shell grep -s -F "skb_queue_empty_lockless" "$(srctree)/include/linux/skbuff.h"),)
+ccflags-y += -DCOMPAT_HAS_SKB_QUEUE_EMPTY_LOCKLESS
+endif
+ifneq ($(shell grep -s -F "define NLA_POLICY_MASK" "$(srctree)/include/net/netlink.h"),)
+ccflags-y += -DCOMPAT_HAS_NLA_POLICY_MASK
+endif
+ifneq ($(shell grep -s -F "ktime_get_coarse_boottime_ns" "$(srctree)/include/linux/timekeeping.h"),)
+ccflags-y += -DCOMPAT_HAS_KTIME_GET_COARSE_BOOTTIME_NS
+endif
+ifneq ($(shell grep -s -F "bool rng_is_initialized" "$(srctree)/include/linux/random.h"),)
+ccflags-y += -DCOMPAT_HAS_RNG_IS_INITIALIZED
+endif
+ifneq ($(shell grep -s -F "void le32_to_cpu_array" "$(srctree)/include/linux/byteorder/generic.h"),)
+ccflags-y += -DCOMPAT_HAS_LE32_TO_CPU_ARRAY
+endif
+
 ifdef CONFIG_HZ
 ifeq ($(wildcard $(CURDIR)/include/generated/timeconst.h),)
 ccflags-y += $(shell bash -c '((a=$(CONFIG_HZ), b=1000000)); while ((b > 0)); do ((t=b, b=a%b, a=t)); done; echo "-DHZ_TO_USEC_NUM=$$((1000000/a)) -DHZ_TO_USEC_DEN=$$(($(CONFIG_HZ)/a))";')
