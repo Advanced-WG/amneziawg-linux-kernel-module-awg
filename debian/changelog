@@ -1,3 +1,18 @@
+amneziawg-linux-kmod (1.0.20260929+awg-1) unstable; urgency=medium
+
+  * Transport packets with the length of a handshake message are no longer
+    dropped as bad handshakes (up to 75% loss at one packet size for some
+    S values).
+  * Handshakes from unknown peers are no longer reported over netlink by
+    default (unknown_peer_notify module parameter); where supported only
+    admins can listen.
+  * Kernel limits Jc <= 128 and Jmin/Jmax <= 1280. Jmin = Jmax is kept.
+  * AWG parameters are swapped atomically (RCU); I1-I5 are prepared before
+    a configuration is applied; stricter I1-I5 syntax.
+  * DKMS no longer rebuilds the initramfs.
+
+ -- Advanced-WG <237044+V-Bantserov@users.noreply.github.com>  Tue, 29 Sep 2026 05:48:00 +0300
+
 amneziawg-linux-kmod (1.0.20260928+awg-1) unstable; urgency=medium
 
   * Builds on current RHEL/AlmaLinux 8.10 and 9.8 and CentOS Stream 10:
