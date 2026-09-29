@@ -157,4 +157,6 @@ git archive --prefix=amneziawg-linux-kernel-module-awg-$V/ \
 rpmbuild -ba amneziawg-dkms.spec      # -> ~/rpmbuild/RPMS/noarch/
 ```
 
+Building the .deb needs debhelper 13, which Ubuntu 18.04/20.04 and Debian 10 do not have; the released .deb installs and builds the module there too.
+
 The version comes from `debian/changelog` and the `Version:` of the spec; keep them equal to the tag. A plain `make` in a checkout of the tag uses the same version.

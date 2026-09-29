@@ -66,6 +66,17 @@ The server answers every peer in the form it was contacted with. A cookie reply,
 
 What was detected is reported per peer over netlink in `WGPEER_A_AWG_PEER_FLAGS`: `AWG_PEER_F_FIXED_HEADERS` for AWG 1.0 and `AWG_PEER_F_NO_S4`. When `WGPEER_A_ADVANCED_SECURITY` is absent, the peer is plain WireGuard. `awg show` does not display this; awgctrl-go v1.2.0+ exposes it as `Peer.AWGPeerFlagsKnown`, `FixedHeaders` and `NoS4`.
 
+## Module parameters
+
+Set at load time (`modprobe amneziawg unknown_peer_notify=1`) or in `/sys/module/amneziawg/parameters/` as root.
+
+| Parameter | Default | Description |
+|---|---|---|
+| `unknown_peer_notify` | off | Multicast the public key and address of every handshake from an unknown peer (`WG_CMD_UNKNOWN_PEER`), for a daemon that adds peers on demand. On kernels with `GENL_MCAST_CAP_NET_ADMIN` only admins can listen; on older kernels any local user can. |
+| `bogus_endpoints` | 0 | Replace peer endpoints in dumps with random addresses from `bogus_endpoints_prefix` / `bogus_endpoints_prefix6`. |
+
+Once any AWG parameter has been set on an interface it stays obfuscated: setting H1–H4 back to 1–4 and S1–S4 to 0 makes the packets plain WireGuard again, but the interface keeps treating new peers as AWG peers until it is recreated.
+
 ## Using awgctrl-go
 
 The [awgctrl-go](https://github.com/Advanced-WG/awgctrl-go) library generates parameters within the recommended ranges, and checks them against the kernel limits before sending them:

@@ -4,6 +4,13 @@ All changes relative to upstream [amneziawg-linux-kernel-module](https://github.
 
 ## Bug fixes
 
+- **receive.c** — transport packets could be taken for handshakes: handshakes are recognised by length (S1 + 148, S2 + 92, S3 + 64), and for some S values a transport packet (S4 + 32 + 16k bytes) has exactly that length, with ciphertext where the H header is expected. With S1 = 28 and a wide H1 range, 75% of 176-byte packets were dropped. A packet of handshake length that also reads as a transport packet for one of our keypairs is now taken as transport (`tests/size-collision.sh`)
+- **netlink.c** — handshakes from unknown public keys were multicast with the key and the client's address to a netlink group any local user could join. Now off by default (`unknown_peer_notify` module parameter) and admin-only where the kernel supports it (`GENL_MCAST_CAP_NET_ADMIN`)
+- **noise.c** — an endpoint was allocated for every handshake initiation without checking the result; out of memory with an unknown key dereferenced NULL. It is on the stack now
+- **device.c / receive.c / send.c** — H1–H4, S1–S4 and Jc/Jmin/Jmax are published with RCU, so a packet processed during a reconfiguration sees either the old or the new set, never a mix
+- **device.c / junk.c** — I1–I5 are turned into packets while the request is validated; running out of memory afterwards no longer leaves new descriptions active on a failed request
+- **device.c** — Jc ≤ 128 and Jmin/Jmax ≤ 1280 (up to ~4 GB of junk per handshake were accepted); Jmin = Jmax is kept as set instead of becoming Jmax + 1
+- **junk.c** — I1–I5 with text outside tags or an unclosed tag are rejected instead of partly ignored
 - **noise.c** — a replayed handshake initiation switched how the server frames packets for the peer: `advanced_security` (and `fixed_headers`) were set before the timestamp replay and flood checks. Replaying an old plain-WireGuard initiation of a client that now uses AWG made the server send it plain WireGuard packets, which the client accepts, so obfuscation was silently off until its next handshake. They are now set only for an accepted initiation (`tests/replay-framing.sh`)
 - **netlink.c / device.c** — a rejected configuration stayed active: `wg_set_device` stored Jc/Jmin/Jmax/S1–S4/H1–H4/I1–I5 into the device first and validated afterwards, so e.g. `awg set awg0 jmin 2000` (with Jmax 1000) returned EINVAL but left Jmin > Jmax in place and the next handshake overflowed the junk buffer (same crash as upstream [#254](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module/issues/254) / [#225](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module/issues/225)). AWG parameters are now staged, validated as a whole (including I1–I5 parsing) and only then committed — and validated before the listen port or fwmark change, so a rejected request changes nothing
 - **send.c** — junk packet sizes are drawn from locally read, ordered bounds, so a concurrent reconfiguration can never make the draw exceed the buffer; removed a label at the end of a compound statement (rejected by older compilers)
@@ -67,6 +74,8 @@ Known limit: a cookie reply (only sent under load) always uses S3, since the pee
 
 ## Build & deployment
 
+- **tests/awg-config.sh** — kernel limits, I1–I5 syntax, what a handshake sends (tcpdump), reconfiguration under traffic
+- **dkms.conf** — dropped `REMAKE_INITRD`: the module is not needed at boot, and rebuilding the initramfs slowed every kernel update
 - **tests/compile-matrix.sh** — builds the module with `-Werror` against the kernel headers of AlmaLinux 8/9/10, CentOS Stream 10, Ubuntu 18.04–26.04 (including HWE kernels) and Debian 10–sid, each in a clean podman container with the distribution's own gcc (17 kernels, 4.15 to 7.2); with PACKAGES=1 it also installs the .deb/.rpm on each and runs `dkms build`
 - **dkms.conf** — added `MAKE` and `CLEAN` directives (DKMS failed to rebuild on kernel update without them)
 - **Makefile** — auto-versioning from git commit timestamp (`1.0.YYYYMMDD-HH.MM-awg`)

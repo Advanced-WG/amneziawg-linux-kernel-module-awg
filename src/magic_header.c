@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include "magic_header.h"
 
 #include <linux/string.h>

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef H_MAGIC_HEADER
 #define H_MAGIC_HEADER
 

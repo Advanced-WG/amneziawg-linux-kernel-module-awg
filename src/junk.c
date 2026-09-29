@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include "junk.h"
 #include "messages.h"
 #include "peer.h"

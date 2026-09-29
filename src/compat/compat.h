@@ -1250,7 +1250,10 @@ static inline u32 get_random_u32_below(u32 ceil)
 }
 static inline u32 get_random_u32_inclusive(u32 floor, u32 ceil)
 {
-	return floor + get_random_u32_below(ceil - floor + 1);
+	u32 range = ceil - floor + 1;
+
+	/* 0 - U32_MAX wraps the range to 0. */
+	return range ? floor + get_random_u32_below(range) : get_random_u32();
 }
 #endif
 
