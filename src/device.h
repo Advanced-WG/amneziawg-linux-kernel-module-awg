@@ -23,6 +23,8 @@
 struct wg_device;
 
 #define AWG_ISPEC_COUNT 5
+#define AWG_JC_MAX 128
+#define AWG_JUNK_SIZE_MAX 1280
 
 struct multicore_worker {
 	void *ptr;

@@ -4,9 +4,9 @@
 
 | Parameter | Kernel limit | Recommended | Description |
 |---|---|---|---|
-| **Jc** | 0 – 65535 | 0 – 10 | Junk packets sent before each handshake initiation (0 = none) |
-| **Jmin** | 0 – 65535, ≤ Jmax | 64 – 1024 | Minimum junk packet size (bytes) |
-| **Jmax** | 0 – 65534, ≥ Jmin | 64 – 1024 | Maximum junk packet size (bytes); 0 turns junk packets off |
+| **Jc** | 0 – 128 | 0 – 10 | Junk packets sent before each handshake initiation (0 = none) |
+| **Jmin** | 0 – 1280, ≤ Jmax | 64 – 1024 | Minimum junk packet size (bytes) |
+| **Jmax** | 0 – 1280, ≥ Jmin | 64 – 1024 | Maximum junk packet size (bytes); 0 turns junk packets off |
 | **S1** | 0 – 65387 | 0 – 64 | Random prefix of handshake initiations (148 bytes) |
 | **S2** | 0 – 65443 | 0 – 64 | Random prefix of handshake responses (92 bytes) |
 | **S3** | 0 – 65471 | 0 – 64 | Random prefix of cookie replies (64 bytes) |
@@ -17,10 +17,11 @@
 | **H4** | `N` or `N-M` | range, ≥ 5 | Header of transport packets |
 | **I1–I5** | tags, ≤ 65535 bytes | I1 only | Packets sent before a handshake initiation (see below) |
 
-The kernel limits are what the module accepts: S1–S4 plus the size of their message must fit in 65535 bytes. Values beyond the recommended ranges work but make packets large enough to be fragmented. Anything above about 1280 bytes in total may not pass every path.
+The kernel limits are what the module accepts: at most 128 junk packets of at most 1280 bytes, and S1–S4 plus the size of their message must fit in 65535 bytes. Values beyond the recommended ranges work but make packets large enough to be fragmented. Anything above about 1280 bytes in total may not pass every path.
 
 **Checked by the module** (a violation fails `awg set` with `Invalid argument`, and the device keeps its previous values):
-- Jmin ≤ Jmax unless Jmax is 0. With junk packets on and Jmin = Jmax, the module uses Jmax + 1 so the sizes still vary.
+- Jc ≤ 128, Jmin and Jmax ≤ 1280.
+- Jmin ≤ Jmax unless Jmax is 0. With Jmin = Jmax every junk packet has the same size.
 - H1–H4 must not overlap. They are decimal 32-bit numbers, and a single value `N` means the range `N-N`.
 - I1–I5 must parse (see below).
 

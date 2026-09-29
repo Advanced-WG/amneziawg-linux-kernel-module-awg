@@ -569,7 +569,7 @@ void wg_awg_params_get(const struct wg_device *wg, struct awg_params *p)
 
 /* Validates a staged AWG configuration before it is committed. idesc holds
  * the new I1-I5 descriptions (NULL = unchanged); the current ones were
- * validated when they were set. May adjust p->jmax (see below).
+ * validated when they were set.
  */
 int wg_awg_params_check(const struct wg_device *wg, struct awg_params *p,
 			char *const idesc[])
@@ -577,16 +577,20 @@ int wg_awg_params_check(const struct wg_device *wg, struct awg_params *p,
 	int err;
 	int i, j;
 
-	/* When jmin == jmax, get_random_u32_inclusive() always returns the
-	 * same value, making every junk packet identical in size. Bump jmax
-	 * by one so there are at least two possible sizes.
+	/* Every handshake initiation sends jc junk packets of up to jmax bytes
+	 * to the peer, from the handshake worker. Unbounded, a typo could make
+	 * that gigabytes per handshake; junk larger than a typical MTU would be
+	 * fragmented, which is easy to spot.
 	 */
-	if (p->jc && p->jmin == p->jmax)
-		p->jmax++;
+	if (p->jc > AWG_JC_MAX) {
+		net_dbg_ratelimited("%s: Jc: %d; must be at most %d\n",
+				    wg->dev->name, p->jc, AWG_JC_MAX);
+		return -EINVAL;
+	}
 
-	if (p->jmax >= MESSAGE_MAX_SIZE) {
-		net_dbg_ratelimited("%s: JunkPacketMaxSize: %d; should be smaller than maxSegmentSize: %d\n",
-							wg->dev->name, p->jmax, MESSAGE_MAX_SIZE);
+	if (p->jmin > AWG_JUNK_SIZE_MAX || p->jmax > AWG_JUNK_SIZE_MAX) {
+		net_dbg_ratelimited("%s: Jmin/Jmax: %d/%d; must be at most %d\n",
+				    wg->dev->name, p->jmin, p->jmax, AWG_JUNK_SIZE_MAX);
 		return -EINVAL;
 	}
 
