@@ -48,14 +48,33 @@ static bool awg_header_at(struct sk_buff *skb, struct wg_device *wg, int idx,
 static bool awg_known_keypair(struct wg_device *wg, const u8 *data)
 {
 	const struct message_data *msg = (const struct message_data *)data;
-	struct index_hashtable_entry *entry;
-	struct wg_peer *peer = NULL;
 
-	entry = wg_index_hashtable_lookup(wg->index_hashtable,
-					  INDEX_HASHTABLE_KEYPAIR,
-					  get_unaligned(&msg->key_idx), &peer);
-	wg_peer_put(peer);
-	return entry != NULL;
+	return wg_index_hashtable_contains(wg->index_hashtable,
+					   INDEX_HASHTABLE_KEYPAIR,
+					   get_unaligned(&msg->key_idx));
+}
+
+/* Is the packet a transport packet for one of our keypairs, in any framing
+ * we accept? Handshake messages are recognised by length, and a transport
+ * packet can have exactly that length (S4 + 32 + 16k = S1 + 148 for some
+ * S values); the bytes where the handshake header would be are ciphertext
+ * then, which a wide H range often matches.
+ */
+static bool awg_is_known_transport(struct sk_buff *skb, struct wg_device *wg)
+{
+	unsigned int s4 = wg->junk_size[MSGIDX_TRANSPORT];
+
+	if (skb->len >= s4 + MESSAGE_MINIMUM_LENGTH &&
+	    awg_header_at(skb, wg, MSGIDX_TRANSPORT, s4) &&
+	    awg_known_keypair(wg, skb->data + s4))
+		return true;
+	if (skb->len < MESSAGE_MINIMUM_LENGTH)
+		return false;
+	if ((s4 && awg_header_at(skb, wg, MSGIDX_TRANSPORT, 0)) ||
+	    (wg->advanced_security &&
+	     le32_to_cpu(get_unaligned((__le32 *)skb->data)) == MESSAGE_DATA))
+		return awg_known_keypair(wg, skb->data);
+	return false;
 }
 
 static size_t awg_accept(struct sk_buff *skb, unsigned int junk, int idx,
@@ -94,7 +113,8 @@ static size_t prepare_awg_message(struct sk_buff *skb, struct wg_device *wg)
 		unsigned int junk = wg->junk_size[idx];
 
 		if (skb->len == junk + awg_message_sizes[idx] &&
-		    awg_header_at(skb, wg, idx, junk))
+		    awg_header_at(skb, wg, idx, junk) &&
+		    !awg_is_known_transport(skb, wg))
 			return awg_accept(skb, junk, idx, 0);
 	}
 
@@ -105,7 +125,8 @@ static size_t prepare_awg_message(struct sk_buff *skb, struct wg_device *wg)
 	 */
 	if (wg->junk_size[MSGIDX_HANDSHAKE_COOKIE] &&
 	    skb->len == MESSAGE_COOKIE_REPLY_SIZE &&
-	    awg_header_at(skb, wg, MSGIDX_HANDSHAKE_COOKIE, 0))
+	    awg_header_at(skb, wg, MSGIDX_HANDSHAKE_COOKIE, 0) &&
+	    !awg_is_known_transport(skb, wg))
 		return awg_accept(skb, 0, MSGIDX_HANDSHAKE_COOKIE, 0); /* no S3 */
 
 	type = le32_to_cpu(SKB_TYPE_LE32(skb));

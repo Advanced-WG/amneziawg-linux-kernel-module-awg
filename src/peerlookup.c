@@ -224,3 +224,25 @@ wg_index_hashtable_lookup(struct index_hashtable *table,
 	rcu_read_unlock_bh();
 	return entry;
 }
+
+/* Like wg_index_hashtable_lookup(), without taking a peer reference: only
+ * answers whether the index is currently ours.
+ */
+bool wg_index_hashtable_contains(struct index_hashtable *table,
+				 const enum index_hashtable_type type_mask,
+				 const __le32 index)
+{
+	struct index_hashtable_entry *iter_entry;
+	bool found = false;
+
+	rcu_read_lock_bh();
+	hlist_for_each_entry_rcu_bh(iter_entry, index_bucket(table, index),
+				    index_hash) {
+		if (iter_entry->index == index) {
+			found = iter_entry->type & type_mask;
+			break;
+		}
+	}
+	rcu_read_unlock_bh();
+	return found;
+}

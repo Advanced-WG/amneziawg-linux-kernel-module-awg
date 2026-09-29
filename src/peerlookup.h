@@ -60,5 +60,8 @@ struct index_hashtable_entry *
 wg_index_hashtable_lookup(struct index_hashtable *table,
 			  const enum index_hashtable_type type_mask,
 			  const __le32 index, struct wg_peer **peer);
+bool wg_index_hashtable_contains(struct index_hashtable *table,
+				 const enum index_hashtable_type type_mask,
+				 const __le32 index);
 
 #endif /* _WG_PEERLOOKUP_H */
