@@ -94,6 +94,10 @@ ifneq ($(shell grep -s -F "void le32_to_cpu_array" "$(srctree)/include/linux/byt
 ccflags-y += -DCOMPAT_HAS_LE32_TO_CPU_ARRAY
 endif
 
+ifneq ($(shell grep -s -F "GENL_MCAST_CAP_NET_ADMIN" "$(srctree)/include/net/genetlink.h"),)
+ccflags-y += -DCOMPAT_HAS_GENL_MCAST_CAP
+endif
+
 ifdef CONFIG_HZ
 ifeq ($(wildcard $(CURDIR)/include/generated/timeconst.h),)
 ccflags-y += $(shell bash -c '((a=$(CONFIG_HZ), b=1000000)); while ((b > 0)); do ((t=b, b=a%b, a=t)); done; echo "-DHZ_TO_USEC_NUM=$$((1000000/a)) -DHZ_TO_USEC_DEN=$$(($(CONFIG_HZ)/a))";')

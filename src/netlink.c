@@ -36,6 +36,20 @@ module_param(bogus_endpoints, int, 0600);
 module_param_string(bogus_endpoints_prefix, bogus_endpoints_prefix, sizeof(bogus_endpoints_prefix), 0600);
 module_param_string(bogus_endpoints_prefix6, bogus_endpoints_prefix6, sizeof(bogus_endpoints_prefix6), 0600);
 
+/* Multicast the public key and endpoint of every handshake from an unknown
+ * peer (WG_CMD_UNKNOWN_PEER). Off by default: it is only useful to a daemon
+ * that adds peers on demand, and on kernels without GENL_MCAST_CAP_NET_ADMIN
+ * any local user can listen to the group.
+ */
+static bool unknown_peer_notify;
+module_param(unknown_peer_notify, bool, 0600);
+MODULE_PARM_DESC(unknown_peer_notify, "Report handshakes from unknown peers over netlink (default: off)");
+
+bool wg_unknown_peer_notify_enabled(void)
+{
+	return READ_ONCE(unknown_peer_notify);
+}
+
 static struct genl_family genl_family;
 
 static const struct nla_policy device_policy[WGDEVICE_A_MAX + 1] = {
@@ -1155,7 +1169,11 @@ struct genl_ops genl_ops[] = {
 
 static const struct genl_multicast_group wg_genl_mcgrps[] = {
 	{
-		.name = WG_MULTICAST_GROUP_AUTH
+		.name = WG_MULTICAST_GROUP_AUTH,
+#ifdef COMPAT_HAS_GENL_MCAST_CAP
+		/* Carries peers' public keys and addresses. */
+		.flags = GENL_MCAST_CAP_NET_ADMIN,
+#endif
 	}
 };
 
