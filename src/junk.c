@@ -7,6 +7,7 @@
 #include <linux/string.h>
 #include <linux/random.h>
 #include <linux/ktime.h>
+#include <linux/ctype.h>
 
 static int parse_b_tag(char* val, struct list_head* head) {
     int err;
@@ -182,17 +183,30 @@ static int parse_rd_tag(char* val, struct list_head* head) {
     return 0;
 }
 
+/* Only whitespace may separate tags; anything else is a typo. */
+static bool jp_is_blank(const char* s) {
+    for (; *s; ++s)
+        if (!isspace(*s))
+            return false;
+    return true;
+}
+
 int jp_parse_tags(char* str, struct list_head* head) {
     int err = 0;
     char* key;
     char* val;
+    char* text;
 
     while (true)
     {
-        strsep(&str, "<");
-        val = strsep(&str, ">");
-        if (!val)
+        text = strsep(&str, "<");
+        if (!jp_is_blank(text))
+            return -EINVAL;
+        if (!str)
             break;
+        val = strsep(&str, ">");
+        if (!str)
+            return -EINVAL; /* unclosed tag */
 
         key = strsep(&val, " ");
 
@@ -284,99 +298,81 @@ static int jp_tags_size(struct list_head *head, int *pkt_size, int *mods_size) {
     return 0;
 }
 
-/* Checks that desc is a valid I1-I5 description without touching any spec. */
-int jp_spec_check(const char *desc) {
+void jp_built_free(struct jp_built *built) {
+    kfree(built->pkt);
+    kfree(built->mods);
+    memset(built, 0, sizeof(*built));
+}
+
+/* Parses an I1-I5 description into a packet and its modifiers without
+ * touching any spec, so a configuration can be fully prepared (and fail)
+ * before anything is applied. An empty description builds an empty packet.
+ */
+int jp_spec_build(const char *desc, struct jp_built *out) {
     int err, pkt_size, mods_size;
+    struct jp_tag *tag;
+    struct jp_modifier *mod;
     char *buf;
     LIST_HEAD(head);
+
+    memset(out, 0, sizeof(*out));
 
     buf = kstrdup(desc, GFP_KERNEL);
     if (!buf)
         return -ENOMEM;
 
     err = jp_parse_tags(buf, &head);
-    if (!err)
-        err = jp_tags_size(&head, &pkt_size, &mods_size);
+    if (err)
+        goto out;
 
+    err = jp_tags_size(&head, &pkt_size, &mods_size);
+    if (err || !pkt_size)
+        goto out;
+
+    out->pkt = kzalloc(pkt_size, GFP_KERNEL);
+    out->mods = kcalloc(max(mods_size, 1), sizeof(*out->mods), GFP_KERNEL);
+    if (!out->pkt || !out->mods) {
+        err = -ENOMEM;
+        goto out;
+    }
+
+    list_for_each_entry_reverse(tag, &head, head) {
+        if (tag->pkt)
+            memcpy(out->pkt + out->pkt_size, tag->pkt, tag->pkt_size);
+
+        if (tag->func) {
+            mod = out->mods + out->mods_size++;
+            mod->func = tag->func;
+            mod->buf = out->pkt + out->pkt_size;
+            mod->buf_len = tag->pkt_size;
+        }
+
+        out->pkt_size += tag->pkt_size;
+    }
+
+out:
+    if (err)
+        jp_built_free(out);
     jp_tags_free(&head);
     kfree(buf);
     return err;
 }
 
-int jp_spec_setup(struct jp_spec *spec) {
-    int err = 0;
-    int pkt_size, mods_size;
-    struct jp_tag *tag;
-    struct jp_modifier *mod;
-    char* buf;
-    LIST_HEAD(head);
-
+/* Replaces the spec's description and packet. Takes ownership of desc and of
+ * the built packet, and clears *built.
+ */
+void jp_spec_install(struct jp_spec *spec, char *desc, struct jp_built *built) {
     mutex_lock(&spec->lock);
-
+    kfree(spec->desc);
     kfree(spec->pkt);
     kfree(spec->mods);
-    spec->pkt = NULL;
-    spec->mods = NULL;
-    spec->pkt_size = 0;
-    spec->mods_size = 0;
-
-    if (spec->desc == NULL) {
-        mutex_unlock(&spec->lock);
-        return 0;
-    }
-
-    buf = kstrdup(spec->desc, GFP_KERNEL);
-    if (!buf) {
-        err = -ENOMEM;
-        goto error;
-    }
-
-    err = jp_parse_tags(buf, &head);
-    if (err)
-        goto error;
-
-    err = jp_tags_size(&head, &pkt_size, &mods_size);
-    if (err)
-        goto error;
-
-    spec->pkt = kzalloc(pkt_size, GFP_KERNEL);
-    spec->mods = kzalloc(mods_size * sizeof(*spec->mods), GFP_KERNEL);
-    if (!spec->pkt || !spec->mods) {
-        err = -ENOMEM;
-        goto error;
-    }
-
-    spec->pkt_size = 0;
-    list_for_each_entry_reverse(tag, &head, head) {
-        if (tag->pkt) {
-            memcpy(spec->pkt + spec->pkt_size, tag->pkt, tag->pkt_size);
-        }
-
-        if (tag->func) {
-            mod = spec->mods + spec->mods_size;
-            mod->func = tag->func;
-            mod->buf = spec->pkt + spec->pkt_size;
-            mod->buf_len = tag->pkt_size;
-
-            spec->mods_size++;
-        }
-
-        spec->pkt_size += tag->pkt_size;
-    }
-
-error:
-    if (err) {
-        kfree(spec->pkt);
-        kfree(spec->mods);
-        spec->pkt = NULL;
-        spec->mods = NULL;
-        spec->pkt_size = 0;
-        spec->mods_size = 0;
-    }
-    jp_tags_free(&head);
-    kfree(buf);
+    spec->desc = desc;
+    spec->pkt = built->pkt;
+    spec->mods = built->mods;
+    spec->pkt_size = built->pkt_size;
+    spec->mods_size = built->mods_size;
     mutex_unlock(&spec->lock);
-    return err;
+    memset(built, 0, sizeof(*built));
 }
 
 /* Caller must hold spec->lock */

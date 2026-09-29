@@ -36,12 +36,12 @@ static const size_t awg_message_sizes[] = {
 };
 
 /* Does the packet carry the H<idx+1> header after a junk prefix of len junk? */
-static bool awg_header_at(struct sk_buff *skb, struct wg_device *wg, int idx,
-			  unsigned int junk)
+static bool awg_header_at(struct sk_buff *skb, const struct awg_params *p,
+			  int idx, unsigned int junk)
 {
 	/* data + junk is unaligned for most S values */
 	return mh_validate(get_unaligned((__le32 *)(skb->data + junk)),
-			   &wg->headers[idx]);
+			   &p->headers[idx]);
 }
 
 /* Is the receiver index of a transport header at data one of our keypairs? */
@@ -60,17 +60,18 @@ static bool awg_known_keypair(struct wg_device *wg, const u8 *data)
  * S values); the bytes where the handshake header would be are ciphertext
  * then, which a wide H range often matches.
  */
-static bool awg_is_known_transport(struct sk_buff *skb, struct wg_device *wg)
+static bool awg_is_known_transport(struct sk_buff *skb, struct wg_device *wg,
+				   const struct awg_params *p)
 {
-	unsigned int s4 = wg->junk_size[MSGIDX_TRANSPORT];
+	unsigned int s4 = p->junk_size[MSGIDX_TRANSPORT];
 
 	if (skb->len >= s4 + MESSAGE_MINIMUM_LENGTH &&
-	    awg_header_at(skb, wg, MSGIDX_TRANSPORT, s4) &&
+	    awg_header_at(skb, p, MSGIDX_TRANSPORT, s4) &&
 	    awg_known_keypair(wg, skb->data + s4))
 		return true;
 	if (skb->len < MESSAGE_MINIMUM_LENGTH)
 		return false;
-	if ((s4 && awg_header_at(skb, wg, MSGIDX_TRANSPORT, 0)) ||
+	if ((s4 && awg_header_at(skb, p, MSGIDX_TRANSPORT, 0)) ||
 	    (wg->advanced_security &&
 	     le32_to_cpu(get_unaligned((__le32 *)skb->data)) == MESSAGE_DATA))
 		return awg_known_keypair(wg, skb->data);
@@ -92,9 +93,10 @@ static size_t awg_accept(struct sk_buff *skb, unsigned int junk, int idx,
  * S3/S4 prefix, and plain WireGuard. Stores the MESSAGE_* type and the
  * AWG_PACKET_* flags in PACKET_CB and returns the header length (0: drop).
  */
-static size_t prepare_awg_message(struct sk_buff *skb, struct wg_device *wg)
+static size_t prepare_awg_message(struct sk_buff *skb, struct wg_device *wg,
+				  const struct awg_params *p)
 {
-	unsigned int s4 = wg->junk_size[MSGIDX_TRANSPORT];
+	unsigned int s4 = p->junk_size[MSGIDX_TRANSPORT];
 	bool with_s4, without_s4, plain;
 	u32 type;
 	int idx;
@@ -110,11 +112,11 @@ static size_t prepare_awg_message(struct sk_buff *skb, struct wg_device *wg)
 		return 0;
 
 	for (idx = MSGIDX_HANDSHAKE_INIT; idx <= MSGIDX_HANDSHAKE_COOKIE; ++idx) {
-		unsigned int junk = wg->junk_size[idx];
+		unsigned int junk = p->junk_size[idx];
 
 		if (skb->len == junk + awg_message_sizes[idx] &&
-		    awg_header_at(skb, wg, idx, junk) &&
-		    !awg_is_known_transport(skb, wg))
+		    awg_header_at(skb, p, idx, junk) &&
+		    !awg_is_known_transport(skb, wg, p))
 			return awg_accept(skb, junk, idx, 0);
 	}
 
@@ -123,10 +125,10 @@ static size_t prepare_awg_message(struct sk_buff *skb, struct wg_device *wg)
 	 * and in a handshake packet those bytes are random key material that
 	 * a wide H4 range matches quite often.
 	 */
-	if (wg->junk_size[MSGIDX_HANDSHAKE_COOKIE] &&
+	if (p->junk_size[MSGIDX_HANDSHAKE_COOKIE] &&
 	    skb->len == MESSAGE_COOKIE_REPLY_SIZE &&
-	    awg_header_at(skb, wg, MSGIDX_HANDSHAKE_COOKIE, 0) &&
-	    !awg_is_known_transport(skb, wg))
+	    awg_header_at(skb, p, MSGIDX_HANDSHAKE_COOKIE, 0) &&
+	    !awg_is_known_transport(skb, wg, p))
 		return awg_accept(skb, 0, MSGIDX_HANDSHAKE_COOKIE, 0); /* no S3 */
 
 	type = le32_to_cpu(SKB_TYPE_LE32(skb));
@@ -137,10 +139,10 @@ static size_t prepare_awg_message(struct sk_buff *skb, struct wg_device *wg)
 		return awg_accept(skb, 0, type - 1, AWG_PACKET_PLAIN);
 
 	with_s4 = skb->len >= s4 + MESSAGE_MINIMUM_LENGTH &&
-		  awg_header_at(skb, wg, MSGIDX_TRANSPORT, s4);
+		  awg_header_at(skb, p, MSGIDX_TRANSPORT, s4);
 	/* Without the S4 prefix: AWG peer without S3/S4, or plain WireGuard. */
 	without_s4 = s4 && skb->len >= MESSAGE_MINIMUM_LENGTH &&
-		     awg_header_at(skb, wg, MSGIDX_TRANSPORT, 0);
+		     awg_header_at(skb, p, MSGIDX_TRANSPORT, 0);
 	plain = plain && type == MESSAGE_DATA && skb->len >= MESSAGE_MINIMUM_LENGTH;
 	/* The bytes at offset S4 of a packet without the prefix are counter
 	 * and ciphertext, which fall into a wide H4 range quite often. When
@@ -196,7 +198,9 @@ static int prepare_skb_header(struct sk_buff *skb, struct wg_device *wg)
 	if (unlikely(skb->len != data_len))
 		/* Final len does not agree with calculated len */
 		return -EINVAL;
-	header_len = prepare_awg_message(skb, wg);
+	rcu_read_lock();
+	header_len = prepare_awg_message(skb, wg, rcu_dereference(wg->awg));
+	rcu_read_unlock();
 	if (unlikely(!header_len))
 		return -EINVAL;
 	__skb_push(skb, data_offset);
@@ -591,7 +595,8 @@ int wg_packet_rx_poll(struct napi_struct *napi, int budget)
 		if (peer->advanced_security) {
 			if (PACKET_CB(skb)->awg_flags & AWG_PACKET_S4)
 				WRITE_ONCE(peer->no_s4, false);
-			else if (skb->len && peer->device->junk_size[MSGIDX_TRANSPORT])
+			else if (skb->len &&
+				 wg_awg_junk_size(peer->device, MSGIDX_TRANSPORT))
 				WRITE_ONCE(peer->no_s4, true);
 		}
 

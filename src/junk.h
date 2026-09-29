@@ -36,9 +36,19 @@ struct jp_spec
     int mods_size;
 };
 
+/* A parsed I1-I5 description, ready to be installed into a jp_spec. */
+struct jp_built
+{
+    u8* pkt;
+    struct jp_modifier* mods;
+    int pkt_size;
+    int mods_size;
+};
+
 void jp_spec_free(struct jp_spec* spec);
-int jp_spec_check(const char* desc);
-int jp_spec_setup(struct jp_spec* spec);
+int jp_spec_build(const char* desc, struct jp_built* out);
+void jp_built_free(struct jp_built* built);
+void jp_spec_install(struct jp_spec* spec, char* desc, struct jp_built* built);
 void jp_spec_applymods(struct jp_spec* spec, struct wg_peer* peer);
 
 #endif

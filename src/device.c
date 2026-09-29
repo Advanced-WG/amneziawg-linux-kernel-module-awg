@@ -341,22 +341,23 @@ static void wg_setup(struct net_device *dev)
 	memset(wg, 0, sizeof(*wg));
 	wg->dev = dev;
 
-	wg->headers[MSGIDX_HANDSHAKE_INIT] = (struct magic_header) {
+	wg->awg_buf[0].headers[MSGIDX_HANDSHAKE_INIT] = (struct magic_header) {
 		.start = MESSAGE_HANDSHAKE_INITIATION,
 		.end = MESSAGE_HANDSHAKE_INITIATION
 	};
-	wg->headers[MSGIDX_HANDSHAKE_RESPONSE] = (struct magic_header) {
+	wg->awg_buf[0].headers[MSGIDX_HANDSHAKE_RESPONSE] = (struct magic_header) {
 		.start = MESSAGE_HANDSHAKE_RESPONSE,
 		.end = MESSAGE_HANDSHAKE_RESPONSE
 	};
-	wg->headers[MSGIDX_HANDSHAKE_COOKIE] = (struct magic_header) {
+	wg->awg_buf[0].headers[MSGIDX_HANDSHAKE_COOKIE] = (struct magic_header) {
 		.start = MESSAGE_HANDSHAKE_COOKIE,
 		.end = MESSAGE_HANDSHAKE_COOKIE
 	};
-	wg->headers[MSGIDX_TRANSPORT] = (struct magic_header) {
+	wg->awg_buf[0].headers[MSGIDX_TRANSPORT] = (struct magic_header) {
 		.start = MESSAGE_DATA,
 		.end = MESSAGE_DATA
 	};
+	RCU_INIT_POINTER(wg->awg, &wg->awg_buf[0]);
 }
 
 static int wg_newlink(struct net_device *dev,
@@ -558,21 +559,33 @@ void wg_device_uninit(void)
 	rcu_barrier();
 }
 
-void wg_awg_params_get(const struct wg_device *wg, struct awg_params *p)
+/* A consistent copy of the device's AWG parameters, for callers that may
+ * sleep or that need several of them.
+ */
+void wg_awg_params_get(struct wg_device *wg, struct awg_params *p)
 {
-	memcpy(p->headers, wg->headers, sizeof(p->headers));
-	memcpy(p->junk_size, wg->junk_size, sizeof(p->junk_size));
-	p->jc = wg->jc;
-	p->jmin = wg->jmin;
-	p->jmax = wg->jmax;
+	rcu_read_lock();
+	*p = *rcu_dereference(wg->awg);
+	rcu_read_unlock();
+}
+
+/* S1-S4 (indexed by MSGIDX_*). */
+u16 wg_awg_junk_size(struct wg_device *wg, int idx)
+{
+	u16 size;
+
+	rcu_read_lock();
+	size = rcu_dereference(wg->awg)->junk_size[idx];
+	rcu_read_unlock();
+	return size;
 }
 
 /* Validates a staged AWG configuration before it is committed. idesc holds
- * the new I1-I5 descriptions (NULL = unchanged); the current ones were
- * validated when they were set.
+ * the new I1-I5 descriptions (NULL = unchanged); each is parsed into built[]
+ * here, so committing it later cannot fail. On error the caller frees built[].
  */
-int wg_awg_params_check(const struct wg_device *wg, struct awg_params *p,
-			char *const idesc[])
+int wg_awg_params_check(const struct wg_device *wg, const struct awg_params *p,
+			char *const idesc[], struct jp_built built[])
 {
 	int err;
 	int i, j;
@@ -633,7 +646,7 @@ int wg_awg_params_check(const struct wg_device *wg, struct awg_params *p,
 	for (i = 0; i < AWG_ISPEC_COUNT; ++i) {
 		if (!idesc[i])
 			continue;
-		err = jp_spec_check(idesc[i]);
+		err = jp_spec_build(idesc[i], &built[i]);
 		if (err) {
 			net_dbg_ratelimited("%s: I%d-packet invalid format\n", wg->dev->name, i + 1);
 			return err;
@@ -644,24 +657,29 @@ int wg_awg_params_check(const struct wg_device *wg, struct awg_params *p,
 }
 
 /* Commits a configuration accepted by wg_awg_params_check(). Takes ownership
- * of the non-NULL idesc strings and clears those slots.
+ * of the non-NULL idesc strings and of built[], and clears those slots.
+ * Called with device_update_lock held.
  */
 void wg_awg_params_set(struct wg_device *wg, const struct awg_params *p,
-		       char *idesc[])
+		       char *idesc[], struct jp_built built[])
 {
+	struct awg_params *cur, *next;
 	int i;
 
-	memcpy(wg->headers, p->headers, sizeof(wg->headers));
-	memcpy(wg->junk_size, p->junk_size, sizeof(wg->junk_size));
-	WRITE_ONCE(wg->jc, p->jc);
-	WRITE_ONCE(wg->jmin, p->jmin);
-	WRITE_ONCE(wg->jmax, p->jmax);
+	cur = rcu_dereference_protected(wg->awg,
+					lockdep_is_held(&wg->device_update_lock));
+	next = cur == &wg->awg_buf[0] ? &wg->awg_buf[1] : &wg->awg_buf[0];
+	*next = *p;
+	rcu_assign_pointer(wg->awg, next);
+	/* Nobody reads cur any more once this returns, so the next change
+	 * may overwrite it.
+	 */
+	synchronize_rcu();
 
 	for (i = 0; i < AWG_ISPEC_COUNT; ++i) {
 		if (!idesc[i])
 			continue;
-		kfree(wg->ispecs[i].desc);
-		wg->ispecs[i].desc = idesc[i];
+		jp_spec_install(&wg->ispecs[i], idesc[i], &built[i]);
 		idesc[i] = NULL;
 	}
 
@@ -673,23 +691,4 @@ void wg_awg_params_set(struct wg_device *wg, const struct awg_params *p,
 			peer->advanced_security = true;
 	}
 	wg->advanced_security = true;
-}
-
-int wg_device_handle_post_config(struct wg_device *wg)
-{
-	int err;
-	int i;
-
-	if (!wg->advanced_security)
-		return 0;
-
-	for (i = 0; i < ARRAY_SIZE(wg->ispecs); ++i) {
-		err = jp_spec_setup(&wg->ispecs[i]);
-		if (err) {
-			net_dbg_ratelimited("%s: I%d-packet invalid format\n", wg->dev->name, i + 1);
-			return err;
-		}
-	}
-
-	return 0;
 }

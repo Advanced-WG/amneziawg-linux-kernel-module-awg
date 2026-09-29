@@ -604,9 +604,16 @@ wg_noise_handshake_consume_initiation(struct message_handshake_initiation *src,
 	 */
 	bool advanced_security = wg->advanced_security &&
 	                         !(PACKET_CB(skb)->awg_flags & AWG_PACKET_PLAIN);
-	bool fixed_headers = advanced_security &&
-	                     wg->headers[MSGIDX_HANDSHAKE_INIT].start != wg->headers[MSGIDX_HANDSHAKE_INIT].end &&
-	                     le32_to_cpu(SKB_TYPE_LE32(skb)) == wg->headers[MSGIDX_HANDSHAKE_INIT].start;
+	bool fixed_headers = false;
+	struct magic_header h1;
+
+	if (advanced_security) {
+		rcu_read_lock();
+		h1 = rcu_dereference(wg->awg)->headers[MSGIDX_HANDSHAKE_INIT];
+		rcu_read_unlock();
+		fixed_headers = h1.start != h1.end &&
+				le32_to_cpu(SKB_TYPE_LE32(skb)) == h1.start;
+	}
 
 	down_read(&wg->static_identity.lock);
 	if (unlikely(!wg->static_identity.has_identity))

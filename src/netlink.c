@@ -467,7 +467,10 @@ err:
 static int wg_put_device_attrs(struct wg_device *wg, struct sk_buff *skb,
 			       struct dump_ctx *ctx)
 {
+	struct awg_params awg;
 	char buf[32];
+
+	wg_awg_params_get(wg, &awg);
 
 	for (;;) {
 		switch (ctx->device_pos) {
@@ -491,59 +494,59 @@ static int wg_put_device_attrs(struct wg_device *wg, struct sk_buff *skb,
 				return -EMSGSIZE;
 			break;
 		case WG_DUMP_JC:
-			if (nla_put_u16(skb, WGDEVICE_A_JC, wg->jc))
+			if (nla_put_u16(skb, WGDEVICE_A_JC, awg.jc))
 				return -EMSGSIZE;
 			break;
 		case WG_DUMP_JMIN:
-			if (nla_put_u16(skb, WGDEVICE_A_JMIN, wg->jmin))
+			if (nla_put_u16(skb, WGDEVICE_A_JMIN, awg.jmin))
 				return -EMSGSIZE;
 			break;
 		case WG_DUMP_JMAX:
-			if (nla_put_u16(skb, WGDEVICE_A_JMAX, wg->jmax))
+			if (nla_put_u16(skb, WGDEVICE_A_JMAX, awg.jmax))
 				return -EMSGSIZE;
 			break;
 		case WG_DUMP_S1:
 			if (nla_put_u16(skb, WGDEVICE_A_S1,
-					wg->junk_size[MSGIDX_HANDSHAKE_INIT]))
+					awg.junk_size[MSGIDX_HANDSHAKE_INIT]))
 				return -EMSGSIZE;
 			break;
 		case WG_DUMP_S2:
 			if (nla_put_u16(skb, WGDEVICE_A_S2,
-					wg->junk_size[MSGIDX_HANDSHAKE_RESPONSE]))
+					awg.junk_size[MSGIDX_HANDSHAKE_RESPONSE]))
 				return -EMSGSIZE;
 			break;
 		case WG_DUMP_H1:
-			if (mh_genspec(&wg->headers[MSGIDX_HANDSHAKE_INIT],
+			if (mh_genspec(&awg.headers[MSGIDX_HANDSHAKE_INIT],
 				       buf, sizeof(buf)) &&
 			    nla_put_string(skb, WGDEVICE_A_H1, buf))
 				return -EMSGSIZE;
 			break;
 		case WG_DUMP_H2:
-			if (mh_genspec(&wg->headers[MSGIDX_HANDSHAKE_RESPONSE],
+			if (mh_genspec(&awg.headers[MSGIDX_HANDSHAKE_RESPONSE],
 				       buf, sizeof(buf)) &&
 			    nla_put_string(skb, WGDEVICE_A_H2, buf))
 				return -EMSGSIZE;
 			break;
 		case WG_DUMP_H3:
-			if (mh_genspec(&wg->headers[MSGIDX_HANDSHAKE_COOKIE],
+			if (mh_genspec(&awg.headers[MSGIDX_HANDSHAKE_COOKIE],
 				       buf, sizeof(buf)) &&
 			    nla_put_string(skb, WGDEVICE_A_H3, buf))
 				return -EMSGSIZE;
 			break;
 		case WG_DUMP_H4:
-			if (mh_genspec(&wg->headers[MSGIDX_TRANSPORT],
+			if (mh_genspec(&awg.headers[MSGIDX_TRANSPORT],
 				       buf, sizeof(buf)) &&
 			    nla_put_string(skb, WGDEVICE_A_H4, buf))
 				return -EMSGSIZE;
 			break;
 		case WG_DUMP_S3:
 			if (nla_put_u16(skb, WGDEVICE_A_S3,
-					wg->junk_size[MSGIDX_HANDSHAKE_COOKIE]))
+					awg.junk_size[MSGIDX_HANDSHAKE_COOKIE]))
 				return -EMSGSIZE;
 			break;
 		case WG_DUMP_S4:
 			if (nla_put_u16(skb, WGDEVICE_A_S4,
-					wg->junk_size[MSGIDX_TRANSPORT]))
+					awg.junk_size[MSGIDX_TRANSPORT]))
 				return -EMSGSIZE;
 			break;
 		case WG_DUMP_I1:
@@ -976,6 +979,7 @@ static int wg_set_device(struct sk_buff *skb, struct genl_info *info)
 {
 	struct wg_device *wg = lookup_interface(info->attrs, skb);
 	char *idesc[AWG_ISPEC_COUNT] = { NULL };
+	struct jp_built built[AWG_ISPEC_COUNT] = { };
 	bool awg_changed = false;
 	struct awg_params awg;
 	u32 flags = 0;
@@ -1043,7 +1047,7 @@ static int wg_set_device(struct sk_buff *skb, struct genl_info *info)
 	 * request must not leave e.g. jmin > jmax active, or half applied.
 	 */
 	if (awg_changed) {
-		ret = wg_awg_params_check(wg, &awg, idesc);
+		ret = wg_awg_params_check(wg, &awg, idesc, built);
 		if (ret)
 			goto out;
 	}
@@ -1066,7 +1070,7 @@ static int wg_set_device(struct sk_buff *skb, struct genl_info *info)
 	}
 
 	if (awg_changed)
-		wg_awg_params_set(wg, &awg, idesc);
+		wg_awg_params_set(wg, &awg, idesc, built);
 
 	if (flags & WGDEVICE_F_REPLACE_PEERS)
 		wg_peer_remove_all(wg);
@@ -1107,10 +1111,6 @@ static int wg_set_device(struct sk_buff *skb, struct genl_info *info)
 	}
 skip_set_private_key:
 
-	ret = wg_device_handle_post_config(wg);
-	if (ret < 0)
-		goto out;
-
 	if (info->attrs[WGDEVICE_A_PEERS]) {
 		struct nlattr *attr, *peer[WGPEER_A_MAX + 1];
 		int rem;
@@ -1131,8 +1131,10 @@ out:
 	mutex_unlock(&wg->device_update_lock);
 	rtnl_unlock();
 	dev_put(wg->dev);
-	for (i = 0; i < ARRAY_SIZE(idesc); ++i)
+	for (i = 0; i < ARRAY_SIZE(idesc); ++i) {
 		kfree(idesc[i]);
+		jp_built_free(&built[i]);
+	}
 out_nodev:
 	if (info->attrs[WGDEVICE_A_PRIVATE_KEY])
 		memzero_explicit(nla_data(info->attrs[WGDEVICE_A_PRIVATE_KEY]),

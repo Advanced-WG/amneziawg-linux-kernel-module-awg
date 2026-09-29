@@ -37,11 +37,11 @@ int mh_genspec(struct magic_header *mh, char *buf, size_t buflen) {
     return scnprintf(buf, buflen, "%u-%u", mh->start, mh->end);
 }
 
-bool mh_validate(__le32 received, struct magic_header* mh) {
+bool mh_validate(__le32 received, const struct magic_header *mh) {
     u32 received_host = le32_to_cpu(received);
 	return received_host >= mh->start && received_host <= mh->end;
 }
 
-u32 mh_genheader(struct magic_header *mh) {
+u32 mh_genheader(const struct magic_header *mh) {
     return get_random_u32_inclusive(mh->start, mh->end);
 }
